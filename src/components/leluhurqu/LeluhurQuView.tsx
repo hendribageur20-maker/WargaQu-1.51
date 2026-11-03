@@ -56,10 +56,12 @@ import {
   Move,
   GripVertical
 } from 'lucide-react';
+import { OrbitQuView } from '../orbitqu/OrbitQuView';
 
 interface LeluhurQuViewProps {
   onBackToWarga: () => void;
   showNotification: (msg: string) => void;
+  initialTab?: 'silsilah' | 'orbitqu' | 'medsos' | 'doa' | 'arsip';
 }
 
 export interface FamilySpouse {
@@ -1241,10 +1243,17 @@ const UpscaleExportModalView: React.FC<UpscaleExportModalProps> = ({
 
 export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
   onBackToWarga,
-  showNotification
+  showNotification,
+  initialTab
 }) => {
-  // Navigation Tabs: Silsilah | Medsos | Doa Malam Jumat | Arsip & Ekspor
-  const [activeTab, setActiveTab] = useState<'silsilah' | 'medsos' | 'doa' | 'arsip'>('silsilah');
+  // Navigation Tabs: Silsilah | OrbitQu | Medsos | Doa Malam Jumat | Arsip & Ekspor
+  const [activeTab, setActiveTab] = useState<'silsilah' | 'orbitqu' | 'medsos' | 'doa' | 'arsip'>(() => {
+    if (initialTab) return initialTab;
+    if (typeof window !== 'undefined' && window.location.hash.includes('orbitqu')) {
+      return 'orbitqu';
+    }
+    return 'silsilah';
+  });
   const [activeMedsosTrah, setActiveMedsosTrah] = useState<'ayah' | 'ibu'>('ayah');
 
   // Silsilah Data (Offline-first LocalStorage - BERSIH DARI MOCK DATA)
@@ -1508,10 +1517,8 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
         testY += CANVAS_CARD_HEIGHT + CANVAS_GAP_Y;
       }
     }
-
     return { x: testX, y: testY };
   };
-
   // ==================== TATA SILSILAH KHUSUS 3 SAYAP ====================
   // Trah Ayah KIRI, Trah Ibu KANAN, Keluarga Inti BAWAH
   // Card Kakak/Adik sejajar kanan-kiri, Anak berurutan sesuai nomor, Pasangan beda warna
@@ -3395,15 +3402,27 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
           </div>
         </div>
 
-        {/* Quick Top Right Actions: Kelola KK, Buku Silsilah, Bersihkan Mock */}
+        {/* Quick Top Right Actions: OrbitQu Tata Surya, Kelola KK, Buku Silsilah, Bersihkan Mock */}
         <div className="flex items-center space-x-1.5">
+          <button
+            onClick={() => setActiveTab('orbitqu')}
+            className={`active:scale-95 text-[11px] font-extrabold px-2.5 py-1.5 rounded-lg flex items-center space-x-1 transition shadow-xs ${
+              activeTab === 'orbitqu'
+                ? 'bg-amber-400 text-slate-950 font-black shadow-md ring-2 ring-amber-300'
+                : 'bg-emerald-950/50 hover:bg-emerald-950/75 text-amber-300 border border-amber-400/60'
+            }`}
+            title="Buka OrbitQu Tata Surya 6 Orbit"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+            <span>OrbitQu</span>
+          </button>
           <button
             onClick={() => handleOpenKkModal('manual')}
             className="bg-emerald-950/40 hover:bg-emerald-950/60 active:scale-95 text-white border border-emerald-400/50 text-[11px] font-bold px-2.5 py-1.5 rounded-lg flex items-center space-x-1 transition shadow-xs"
             title="Kelola & Buat Kartu Keluarga"
           >
             <Camera className="w-3.5 h-3.5 text-[#5eead4]" />
-            <span className="text-white">KK &amp; Scan</span>
+            <span className="text-white hidden sm:inline">KK &amp; Scan</span>
           </button>
           <button
             onClick={() => setShowPdfModal(true)}
@@ -3423,7 +3442,17 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
       </header>
 
       {/* SCROLLABLE MAIN CONTENT AREA */}
-      <main className="flex-1 overflow-y-auto no-scrollbar p-3.5 space-y-3.5 pb-24">
+      <main className={`flex-1 overflow-y-auto no-scrollbar pb-24 ${activeTab === 'orbitqu' ? 'p-0 overflow-hidden relative' : 'p-3.5 space-y-3.5'}`}>
+
+        {/* TAB 0: ORBITQU TATA SURYA KONSENTRIS (6 ORBIT & 4 KUADRAN) */}
+        {activeTab === 'orbitqu' && (
+          <div className="w-full h-full">
+            <OrbitQuView
+              onBackToLeluhurQu={() => setActiveTab('silsilah')}
+              showNotification={showNotification}
+            />
+          </div>
+        )}
 
         {/* TAB 1: POHON SILSILAH INTERAKTIF (TREE VIEW & MULTI-SPOUSE) */}
         {activeTab === 'silsilah' && (
@@ -4590,7 +4619,7 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
       </main>
 
       {/* BOTTOM NAVIGATION BAR KHUSUS LELUHURQU (WARGAQU EMERALD SIGNATURE THEME) */}
-      <nav className="absolute bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-emerald-100 px-3 py-2 flex justify-around items-center z-40 shadow-lg">
+      <nav className="absolute bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-emerald-100 px-2 py-2 flex justify-around items-center z-40 shadow-lg">
         {/* Tab 1: Silsilah */}
         <button
           onClick={() => setActiveTab('silsilah')}
@@ -4600,6 +4629,20 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
         >
           <GitFork className={`w-5 h-5 rotate-180 ${activeTab === 'silsilah' ? 'text-emerald-700' : 'text-slate-400'}`} />
           <span className="text-[10px]">Silsilah</span>
+        </button>
+
+        {/* Tab OrbitQu: Tata Surya */}
+        <button
+          onClick={() => setActiveTab('orbitqu')}
+          className={`flex flex-col items-center gap-1 transition active:scale-95 relative ${
+            activeTab === 'orbitqu' ? 'text-amber-500 font-extrabold' : 'text-slate-400 hover:text-amber-500 font-medium'
+          }`}
+        >
+          <div className="relative">
+            <Sparkles className={`w-5 h-5 ${activeTab === 'orbitqu' ? 'text-amber-500' : 'text-slate-400'}`} />
+            <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full animate-ping"></span>
+          </div>
+          <span className="text-[10px]">OrbitQu 🪐</span>
         </button>
 
         {/* Tab 2: Medsos Trah */}

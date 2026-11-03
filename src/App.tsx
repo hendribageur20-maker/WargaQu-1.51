@@ -26,7 +26,13 @@ type AppScreen = 'warga' | 'leluhurqu' | 'rtqu' | 'siagaqu' | 'chatqu' | 'muamal
 
 export default function App() {
   // Screen Navigation State
-  const [currentScreen, setCurrentScreen] = useState<AppScreen>('warga');
+  const [currentScreen, setCurrentScreen] = useState<AppScreen>(() => {
+    if (typeof window !== 'undefined') {
+      const h = window.location.hash;
+      if (h.includes('orbitqu') || h.includes('leluhurqu')) return 'leluhurqu';
+    }
+    return 'warga';
+  });
   const [selectedEmptyModule, setSelectedEmptyModule] = useState<string>('areaqu');
 
   // Core POS Data States (Persisted for UsahaQu / Bakso Qu)
@@ -68,7 +74,12 @@ export default function App() {
 
   // Tangani tombol Back HP / Browser di tingkat aplikasi
   useEffect(() => {
-    window.history.replaceState({ screen: 'warga' }, '', '#warga');
+    const initialHash = window.location.hash;
+    if (initialHash.includes('orbitqu') || initialHash.includes('leluhurqu')) {
+      window.history.replaceState({ screen: 'leluhurqu' }, '', initialHash);
+    } else {
+      window.history.replaceState({ screen: 'warga' }, '', '#warga');
+    }
 
     const handleGlobalBack = () => {
       // Jika sedang berada di sub-screen selain warga, kembalikan ke beranda warga

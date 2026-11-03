@@ -192,13 +192,17 @@ export const WargaDashboard: React.FC<WargaDashboardProps> = ({
           {/* Grid Items (Menu Utama): Baris 1: LeluhurQu, RtQu, MuamalahQu, AreaQu (Sejajar) */}
           <div className="grid grid-cols-4 gap-y-4 gap-x-2">
             {/* 1. LeluhurQu */}
+            {/* 1. LeluhurQu & OrbitQu */}
             <button
               onClick={onOpenLeluhurQu}
               className="flex flex-col items-center group relative active:scale-95 transition"
-              title="Buka Modul LeluhurQu (Silsilah & Medsos Keluarga)"
+              title="Buka Modul LeluhurQu (Silsilah, OrbitQu Tata Surya & Medsos)"
             >
-              <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700 group-hover:scale-105 transition shadow-xs">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 flex items-center justify-center text-emerald-700 group-hover:scale-105 transition shadow-xs relative">
                 <GitFork className="w-6 h-6 rotate-180 text-emerald-700" />
+                <span className="absolute -top-1.5 -right-1 bg-amber-400 text-slate-900 text-[8px] font-black px-1 rounded-full shadow-2xs animate-pulse">
+                  🪐 Orbit
+                </span>
               </div>
               <span className="text-[11px] font-medium text-slate-700 mt-1.5 text-center leading-tight">
                 LeluhurQu
