@@ -54,14 +54,17 @@ import {
   AlertTriangle,
   Phone,
   Move,
-  GripVertical
+  GripVertical,
+  RotateCw,
+  Palette,
+  Grid,
+  Split
 } from 'lucide-react';
-import { OrbitQuView } from '../orbitqu/OrbitQuView';
+import { BatchQuickAddModal } from './BatchQuickAddModal';
 
 interface LeluhurQuViewProps {
   onBackToWarga: () => void;
   showNotification: (msg: string) => void;
-  initialTab?: 'silsilah' | 'orbitqu' | 'medsos' | 'doa' | 'arsip';
 }
 
 export interface FamilySpouse {
@@ -89,7 +92,7 @@ export interface FamilyMember {
   kinshipTitle?: string; // Aki, Nini, Uyut, Uwa, Mang, Bibi, dll.
   role: string;
   relation: 'ayah' | 'ibu' | 'anak' | 'kakek' | 'nenek' | 'buyut' | 'paman_bibi' | 'cucu' | 'pasangan' | 'saudara';
-  trah: 'ayah' | 'ibu' | 'inti' | 'keduanya';
+  trah: 'ayah' | 'ibu' | 'inti' | 'pasangan' | 'keduanya';
   gender: 'L' | 'P';
   birthYear: string;
   birthDate?: string;
@@ -822,6 +825,7 @@ const EditMemberModalView: React.FC<EditMemberModalProps> = ({
   const [name, setName] = useState(member.name);
   const [nickname, setNickname] = useState(member.nickname || '');
   const [binBinti, setBinBinti] = useState(member.binBinti || '');
+  const [memberNo, setMemberNo] = useState(member.memberNo || '');
   const [kinshipTitle, setKinshipTitle] = useState(member.kinshipTitle || member.role || '');
   const [role, setRole] = useState(member.role || '');
   const [trah, setTrah] = useState<FamilyMember['trah']>(member.trah);
@@ -858,6 +862,7 @@ const EditMemberModalView: React.FC<EditMemberModalProps> = ({
       name: name.trim(),
       nickname: nickname.trim() || undefined,
       binBinti: binBinti.trim() || undefined,
+      memberNo: memberNo.trim() || undefined,
       kinshipTitle: kinshipTitle.trim() || undefined,
       role: role.trim() || kinshipTitle.trim(),
       trah,
@@ -959,7 +964,17 @@ const EditMemberModalView: React.FC<EditMemberModalProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1">No. Silsilah (1 / 2.1)</label>
+              <input
+                type="text"
+                value={memberNo}
+                onChange={e => setMemberNo(e.target.value)}
+                placeholder="misal: 2.1 / TK-01"
+                className="w-full bg-[#f0fdf4] border border-emerald-200 rounded-xl p-2 text-slate-900 font-mono font-bold focus:outline-none focus:border-emerald-600"
+              />
+            </div>
             <div>
               <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1">Jalur Trah</label>
               <select
@@ -967,18 +982,19 @@ const EditMemberModalView: React.FC<EditMemberModalProps> = ({
                 onChange={e => setTrah(e.target.value as any)}
                 className="w-full bg-[#f0fdf4] border border-emerald-200 rounded-xl p-2 text-slate-900 font-bold focus:outline-none focus:border-emerald-600"
               >
-                <option value="ayah">Trah Ayah (Kuningan)</option>
-                <option value="ibu">Trah Ibu (Bogor)</option>
+                <option value="ayah">Trah Ayah</option>
+                <option value="ibu">Trah Ibu</option>
                 <option value="inti">Keluarga Inti</option>
+                <option value="pasangan">Trah Pasangan</option>
               </select>
             </div>
             <div>
-              <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1">Panggilan / Kekerabatan</label>
+              <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1">Kekerabatan / Gelar</label>
               <input
                 type="text"
                 value={kinshipTitle}
                 onChange={e => setKinshipTitle(e.target.value)}
-                placeholder="Aki / Nini / Ayah / Ibu..."
+                placeholder="Uyut / Kakek / Anak..."
                 className="w-full bg-[#f0fdf4] border border-emerald-200 rounded-xl p-2 text-slate-900 font-bold focus:outline-none focus:border-emerald-600"
               />
             </div>
@@ -1091,7 +1107,7 @@ interface UpscaleExportModalProps {
   onClose: () => void;
   onDownloadSvg: (s: 'A4' | 'A3' | 'A2' | 'A1' | 'A0') => void;
   onDownloadPng: (s: 'A4' | 'A3' | 'A2' | 'A1' | 'A0') => void;
-  trahFilter: 'all' | 'ayah' | 'ibu';
+  trahFilter: 'all' | 'ayah' | 'ibu' | 'inti' | 'pasangan' | 'gabung4';
   membersCount: number;
   showNotification: (msg: string) => void;
 }
@@ -1243,17 +1259,10 @@ const UpscaleExportModalView: React.FC<UpscaleExportModalProps> = ({
 
 export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
   onBackToWarga,
-  showNotification,
-  initialTab
+  showNotification
 }) => {
-  // Navigation Tabs: Silsilah | OrbitQu | Medsos | Doa Malam Jumat | Arsip & Ekspor
-  const [activeTab, setActiveTab] = useState<'silsilah' | 'orbitqu' | 'medsos' | 'doa' | 'arsip'>(() => {
-    if (initialTab) return initialTab;
-    if (typeof window !== 'undefined' && window.location.hash.includes('orbitqu')) {
-      return 'orbitqu';
-    }
-    return 'silsilah';
-  });
+  // Navigation Tabs: Silsilah | Medsos | Doa Malam Jumat | Arsip & Ekspor
+  const [activeTab, setActiveTab] = useState<'silsilah' | 'medsos' | 'doa' | 'arsip'>('silsilah');
   const [activeMedsosTrah, setActiveMedsosTrah] = useState<'ayah' | 'ibu'>('ayah');
 
   // Silsilah Data (Offline-first LocalStorage - BERSIH DARI MOCK DATA)
@@ -1317,14 +1326,33 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
     }
   });
 
-  // Tree View Filter & Interactive Controls (Fokus: Semua, Trah Ayah, Trah Ibu)
-  const [treeFilter, setTreeFilter] = useState<'all' | 'ayah' | 'ibu'>('all');
+  // Tree View Filter & Interactive Controls (Semua, Trah Ayah, Trah Ibu, Inti, Pasangan, 4 Trah Matrix)
+  const [treeFilter, setTreeFilter] = useState<'all' | 'ayah' | 'ibu' | 'inti' | 'pasangan' | 'gabung4'>('all');
   const [treeZoom, setTreeZoom] = useState<number>(1);
   const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [canvasLayoutMode, setCanvasLayoutMode] = useState<'modular' | 'grid'>('modular');
   const [isCanvasFullscreen, setIsCanvasFullscreen] = useState(false);
   const [relationChooserMember, setRelationChooserMember] = useState<FamilyMember | null>(null);
+
+  // Fitur Baru: Batch Isi Cepat (Uyut -> Anak 1..5 -> Cucu 2.1..2.3)
+  const [showBatchAddModal, setShowBatchAddModal] = useState(false);
+
+  // Fitur Baru: Opsi Kertas Kanvas (A0 - A4) & Orientasi
+  const [paperCanvasSize, setPaperCanvasSize] = useState<'A0' | 'A1' | 'A2' | 'A3' | 'A4'>('A2');
+  const [paperOrientation, setPaperOrientation] = useState<'landscape' | 'portrait'>('landscape');
+
+  // Fitur Baru: Opsi Warna Frame (Emas, Zamrud, Safir, Ruby, Kayu Jati, Dark Onyx, Perak)
+  const [frameColor, setFrameColor] = useState<'gold' | 'emerald' | 'sapphire' | 'ruby' | 'wood' | 'dark' | 'silver'>('gold');
+
+  // Fitur Baru: Opsi Skala Foto & Ukuran Kartu (A7 Ringkas, A6 Standar, A5 Besar, A4 Poster)
+  const [cardScale, setCardScale] = useState<'A7' | 'A6' | 'A5' | 'A4'>('A6');
+
+  // Fitur Baru: Pola Tata Posisi (Seri 1..5, Paralel 2.1..2.3, 3 Sayap, 4 Trah Matrix X,Y)
+  const [layoutMode, setLayoutMode] = useState<'seri' | 'paralel' | 'three_wings' | 'matrix_4trah'>('three_wings');
+
+  // Fitur Baru: Putar / Rotasi Kanvas (0, 90, 180, 270)
+  const [canvasRotation, setCanvasRotation] = useState<0 | 90 | 180 | 270>(0);
 
   // Touch Pinch-to-zoom (2 Jari) References
   const touchStartDistRef = useRef<number | null>(null);
@@ -1465,11 +1493,32 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
     return `${prefix}-${num}`;
   };
 
-  // Standarisasi Ukuran Kartu Modular & Spasi Canvas
-  const CANVAS_CARD_WIDTH = 270;
-  const CANVAS_CARD_HEIGHT = 185;
-  const CANVAS_GAP_X = 45;
-  const CANVAS_GAP_Y = 65;
+  // Standarisasi Ukuran Kartu Modular Berdasarkan Preset cardScale (A7 - A4)
+  const SCALE_CONFIG = {
+    A7: { width: 210, height: 145, gapX: 32, gapY: 50, photoSize: 40, nameClass: 'text-[11px]', descClass: 'text-[9px]', badgeClass: 'text-[8px]' },
+    A6: { width: 270, height: 185, gapX: 45, gapY: 65, photoSize: 52, nameClass: 'text-xs', descClass: 'text-[10px]', badgeClass: 'text-[9px]' },
+    A5: { width: 330, height: 225, gapX: 55, gapY: 75, photoSize: 66, nameClass: 'text-sm', descClass: 'text-xs', badgeClass: 'text-[10px]' },
+    A4: { width: 400, height: 270, gapX: 70, gapY: 90, photoSize: 82, nameClass: 'text-base', descClass: 'text-sm', badgeClass: 'text-xs' },
+  };
+
+  const currentScale = SCALE_CONFIG[cardScale] || SCALE_CONFIG.A6;
+  const CANVAS_CARD_WIDTH = currentScale.width;
+  const CANVAS_CARD_HEIGHT = currentScale.height;
+  const CANVAS_GAP_X = currentScale.gapX;
+  const CANVAS_GAP_Y = currentScale.gapY;
+
+  // Standarisasi Dimensi Kanvas Kertas Berdasarkan paperCanvasSize (A0 - A4) & Orientasi
+  const PAPER_BOUNDS_MAP = {
+    A0: { w: 4200, h: 2970, mm: '1189 x 841 mm', label: 'A0 (Poster Akbar / Spanduk)' },
+    A1: { w: 3200, h: 2260, mm: '841 x 594 mm', label: 'A1 (Poster Besar)' },
+    A2: { w: 2400, h: 1700, mm: '594 x 420 mm', label: 'A2 (Bagan Sedang)' },
+    A3: { w: 1800, h: 1270, mm: '420 x 297 mm', label: 'A3 (Meja / Buku)' },
+    A4: { w: 1400, h: 990, mm: '297 x 210 mm', label: 'A4 (Standar Cetak HVS)' },
+  };
+
+  const currentPaper = PAPER_BOUNDS_MAP[paperCanvasSize] || PAPER_BOUNDS_MAP.A2;
+  const canvasWidth = paperOrientation === 'landscape' ? currentPaper.w : currentPaper.h;
+  const canvasHeight = paperOrientation === 'landscape' ? currentPaper.h : currentPaper.w;
 
   // Canvas Pan & Auto-Fit Navigation State
   const canvasContainerRef = useRef<HTMLDivElement>(null);
@@ -1519,6 +1568,7 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
     }
     return { x: testX, y: testY };
   };
+
   // ==================== TATA SILSILAH KHUSUS 3 SAYAP ====================
   // Trah Ayah KIRI, Trah Ibu KANAN, Keluarga Inti BAWAH
   // Card Kakak/Adik sejajar kanan-kiri, Anak berurutan sesuai nomor, Pasangan beda warna
@@ -1644,18 +1694,297 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
     return membersList.map(m => result.get(m.id) || m);
   };
 
-  const handleApplyThreeWingsLayout = () => {
+  // ==================== TATA SILSILAH SERI (MENDATAR 1, 2, 3, 4, 5...) ====================
+  const layoutSeri = (membersList: FamilyMember[]): FamilyMember[] => {
+    if (membersList.length === 0) return [];
+    const result = new Map<string, FamilyMember>();
+
+    // 1. Tokoh Utama / Generasi Paling Atas (Root)
+    const roots = membersList.filter(m => !m.parentId || m.relation === 'buyut' || m.relation === 'kakek' || m.relation === 'nenek');
+    const rootList = roots.length > 0 ? roots : [membersList[0]];
+    const startY = 120;
+    const centerX = 1600;
+
+    const totalRootWidth = rootList.length * CANVAS_CARD_WIDTH + Math.max(0, rootList.length - 1) * CANVAS_GAP_X;
+    const rootStartX = Math.max(80, centerX - Math.round(totalRootWidth / 2));
+
+    rootList.forEach((r, idx) => {
+      result.set(r.id, {
+        ...r,
+        canvasX: rootStartX + idx * (CANVAS_CARD_WIDTH + CANVAS_GAP_X),
+        canvasY: startY,
+        memberNo: r.memberNo || (idx + 1).toString()
+      });
+    });
+
+    // 2. Anak-anak Generasi 1 (Seri Horizontal sejajar dari kiri ke kanan 1, 2, 3, 4, 5...)
+    const rootIds = new Set(rootList.map(r => r.id));
+    const directChildren = membersList.filter(m => !rootIds.has(m.id) && (!m.parentId || rootIds.has(m.parentId)));
+    const sortedChildren = directChildren.sort((a, b) => {
+      const numA = parseFloat(a.memberNo || '99') || 99;
+      const numB = parseFloat(b.memberNo || '99') || 99;
+      return numA - numB;
+    });
+
+    const childY = startY + CANVAS_CARD_HEIGHT + CANVAS_GAP_Y + 40;
+    const totalChildW = sortedChildren.length * CANVAS_CARD_WIDTH + Math.max(0, sortedChildren.length - 1) * CANVAS_GAP_X;
+    const childStartX = Math.max(80, centerX - Math.round(totalChildW / 2));
+
+    sortedChildren.forEach((c, idx) => {
+      result.set(c.id, {
+        ...c,
+        canvasX: childStartX + idx * (CANVAS_CARD_WIDTH + CANVAS_GAP_X),
+        canvasY: childY,
+        memberNo: c.memberNo || `${idx + 1}`
+      });
+    });
+
+    // 3. Sub-anak / Cucu (2.1, 2.2, 2.3...) mendatar berurutan di bawah
+    const placedIds = new Set([...rootList.map(r => r.id), ...sortedChildren.map(c => c.id)]);
+    const grandchildren = membersList.filter(m => !placedIds.has(m.id));
+
+    const grandY = childY + CANVAS_CARD_HEIGHT + CANVAS_GAP_Y + 40;
+    const totalGrandW = grandchildren.length * CANVAS_CARD_WIDTH + Math.max(0, grandchildren.length - 1) * CANVAS_GAP_X;
+    const grandStartX = Math.max(80, centerX - Math.round(totalGrandW / 2));
+
+    grandchildren.forEach((g, idx) => {
+      result.set(g.id, {
+        ...g,
+        canvasX: grandStartX + idx * (CANVAS_CARD_WIDTH + CANVAS_GAP_X),
+        canvasY: grandY,
+        memberNo: g.memberNo || `Cucu-${idx + 1}`
+      });
+    });
+
+    return membersList.map(m => result.get(m.id) || m);
+  };
+
+  // ==================== TATA SILSILAH PARALEL (CABANG KOLOM 2.1, 2.2, 2.3...) ====================
+  const layoutParalel = (membersList: FamilyMember[]): FamilyMember[] => {
+    if (membersList.length === 0) return [];
+    const result = new Map<string, FamilyMember>();
+
+    const roots = membersList.filter(m => !m.parentId || m.relation === 'buyut' || m.relation === 'kakek' || m.relation === 'nenek');
+    const rootList = roots.length > 0 ? roots : [membersList[0]];
+    const startY = 100;
+    const centerX = 1600;
+
+    const totalRootWidth = rootList.length * CANVAS_CARD_WIDTH + Math.max(0, rootList.length - 1) * CANVAS_GAP_X;
+    const rootStartX = Math.max(80, centerX - Math.round(totalRootWidth / 2));
+
+    rootList.forEach((r, idx) => {
+      result.set(r.id, {
+        ...r,
+        canvasX: rootStartX + idx * (CANVAS_CARD_WIDTH + CANVAS_GAP_X),
+        canvasY: startY,
+        memberNo: r.memberNo || (idx + 1).toString()
+      });
+    });
+
+    const rootIds = new Set(rootList.map(r => r.id));
+    const directChildren = membersList.filter(m => !rootIds.has(m.id) && (!m.parentId || rootIds.has(m.parentId)));
+    const sortedChildren = directChildren.sort((a, b) => {
+      const numA = parseFloat(a.memberNo || '99') || 99;
+      const numB = parseFloat(b.memberNo || '99') || 99;
+      return numA - numB;
+    });
+
+    const childY = startY + CANVAS_CARD_HEIGHT + CANVAS_GAP_Y + 40;
+    const colSpacing = CANVAS_CARD_WIDTH + CANVAS_GAP_X + 25;
+    const totalColsW = sortedChildren.length * colSpacing;
+    const colStartX = Math.max(80, centerX - Math.round(totalColsW / 2));
+
+    sortedChildren.forEach((child, colIdx) => {
+      const colX = colStartX + colIdx * colSpacing;
+      // Posisi Kepala Kolom Anak
+      result.set(child.id, {
+        ...child,
+        canvasX: colX,
+        canvasY: childY,
+        memberNo: child.memberNo || `${colIdx + 1}`
+      });
+
+      // Cari cucu/sub-anak dari anak ini
+      const subs = membersList.filter(m => m.parentId === child.id || (m.memberNo && m.memberNo.startsWith(`${child.memberNo || (colIdx + 1)}.`)));
+      subs.forEach((sub, subIdx) => {
+        result.set(sub.id, {
+          ...sub,
+          canvasX: colX,
+          canvasY: childY + (subIdx + 1) * (CANVAS_CARD_HEIGHT + CANVAS_GAP_Y),
+          memberNo: sub.memberNo || `${child.memberNo || (colIdx + 1)}.${subIdx + 1}`
+        });
+      });
+    });
+
+    // Anggota yang belum ditempatkan
+    const remaining = membersList.filter(m => !result.has(m.id));
+    remaining.forEach((rem, idx) => {
+      result.set(rem.id, {
+        ...rem,
+        canvasX: 80 + idx * (CANVAS_CARD_WIDTH + CANVAS_GAP_X),
+        canvasY: 2200,
+        memberNo: rem.memberNo || `X-${idx + 1}`
+      });
+    });
+
+    return membersList.map(m => result.get(m.id) || m);
+  };
+
+  // ==================== TATA SILSILAH MATRIX 4 TRAH (X, Y MATRIX) ====================
+  const layoutMatrix4Trah = (membersList: FamilyMember[]): FamilyMember[] => {
+    if (membersList.length === 0) return [];
+    const result = new Map<string, FamilyMember>();
+
+    const centerX = 1800;
+    const centerY = 1300;
+
+    // 1. Pusat (Center Origin): User, Pasangan & Anak-anak
+    const intiMembers = membersList.filter(m => m.trah === 'inti');
+    const userMember = intiMembers.find(m => m.relation === 'ayah' || m.id === '1') || intiMembers[0] || membersList[0];
+    const spouseMember = intiMembers.find(m => m.id !== userMember?.id && (m.relation === 'ibu' || m.relation === 'pasangan' || m.spouseId === userMember?.id));
+    const childrenMembers = intiMembers.filter(m => m.id !== userMember?.id && m.id !== spouseMember?.id);
+
+    if (userMember) {
+      result.set(userMember.id, {
+        ...userMember,
+        canvasX: centerX - CANVAS_CARD_WIDTH - Math.round(CANVAS_GAP_X / 2),
+        canvasY: centerY - Math.round(CANVAS_CARD_HEIGHT / 2),
+        memberNo: userMember.memberNo || '01'
+      });
+    }
+
+    if (spouseMember) {
+      result.set(spouseMember.id, {
+        ...spouseMember,
+        canvasX: centerX + Math.round(CANVAS_GAP_X / 2),
+        canvasY: centerY - Math.round(CANVAS_CARD_HEIGHT / 2),
+        memberNo: spouseMember.memberNo || '02'
+      });
+    }
+
+    // Anak-anak di bawah titik temu User & Pasangan
+    childrenMembers.forEach((ch, idx) => {
+      const totalW = childrenMembers.length * CANVAS_CARD_WIDTH + Math.max(0, childrenMembers.length - 1) * CANVAS_GAP_X;
+      const startX = centerX - Math.round(totalW / 2);
+      result.set(ch.id, {
+        ...ch,
+        canvasX: startX + idx * (CANVAS_CARD_WIDTH + CANVAS_GAP_X),
+        canvasY: centerY + Math.round(CANVAS_CARD_HEIGHT / 2) + CANVAS_GAP_Y,
+        memberNo: ch.memberNo || `A-${idx + 1}`
+      });
+    });
+
+    // 2. Kuadran I (Barat Laut / Kiri Atas): Trah Ayah User
+    const ayahMembers = membersList.filter(m => m.trah === 'ayah' && m.id !== userMember?.id);
+    ayahMembers.forEach((m, idx) => {
+      const row = Math.floor(idx / 3);
+      const col = idx % 3;
+      result.set(m.id, {
+        ...m,
+        canvasX: Math.max(60, centerX - 350 - (col + 1) * (CANVAS_CARD_WIDTH + CANVAS_GAP_X)),
+        canvasY: Math.max(60, centerY - 250 - (row + 1) * (CANVAS_CARD_HEIGHT + CANVAS_GAP_Y)),
+        memberNo: m.memberNo || `TA-${idx + 1}`
+      });
+    });
+
+    // 3. Kuadran II (Timur Laut / Kanan Atas): Trah Ibu User
+    const ibuMembers = membersList.filter(m => m.trah === 'ibu' && m.id !== userMember?.id);
+    ibuMembers.forEach((m, idx) => {
+      const row = Math.floor(idx / 3);
+      const col = idx % 3;
+      result.set(m.id, {
+        ...m,
+        canvasX: centerX + 350 + col * (CANVAS_CARD_WIDTH + CANVAS_GAP_X),
+        canvasY: Math.max(60, centerY - 250 - (row + 1) * (CANVAS_CARD_HEIGHT + CANVAS_GAP_Y)),
+        memberNo: m.memberNo || `TI-${idx + 1}`
+      });
+    });
+
+    // 4. Kuadran III (Barat Daya / Kiri Bawah): Trah Ayah Pasangan
+    const pasanganMembers = membersList.filter(m => (m.trah === 'pasangan' || m.relation === 'pasangan') && m.id !== spouseMember?.id);
+    const pasanganAyah = pasanganMembers.filter(m => m.gender === 'L' || m.role?.toLowerCase().includes('ayah') || m.kinshipTitle?.toLowerCase().includes('ayah'));
+    const pasanganIbu = pasanganMembers.filter(m => !pasanganAyah.includes(m));
+
+    pasanganAyah.forEach((m, idx) => {
+      const row = Math.floor(idx / 3);
+      const col = idx % 3;
+      result.set(m.id, {
+        ...m,
+        canvasX: Math.max(60, centerX - 350 - (col + 1) * (CANVAS_CARD_WIDTH + CANVAS_GAP_X)),
+        canvasY: centerY + 250 + row * (CANVAS_CARD_HEIGHT + CANVAS_GAP_Y),
+        memberNo: m.memberNo || `TPA-${idx + 1}`
+      });
+    });
+
+    // 5. Kuadran IV (Timur Daya / Kanan Bawah): Trah Ibu Pasangan
+    pasanganIbu.forEach((m, idx) => {
+      const row = Math.floor(idx / 3);
+      const col = idx % 3;
+      result.set(m.id, {
+        ...m,
+        canvasX: centerX + 350 + col * (CANVAS_CARD_WIDTH + CANVAS_GAP_X),
+        canvasY: centerY + 250 + row * (CANVAS_CARD_HEIGHT + CANVAS_GAP_Y),
+        memberNo: m.memberNo || `TPI-${idx + 1}`
+      });
+    });
+
+    return membersList.map(m => result.get(m.id) || m);
+  };
+
+  // Dispatcher Penerapan Layout
+  const handleApplyLayout = (mode: 'seri' | 'paralel' | 'three_wings' | 'matrix_4trah') => {
     if (members.length === 0) return;
-    const reordered = layoutTrahThreeWings(members);
+    setLayoutMode(mode);
+    let reordered: FamilyMember[] = [];
+    if (mode === 'seri') {
+      reordered = layoutSeri(members);
+      showNotification('Tata Seri (Anak 1, 2, 3, 4, 5 Berurutan Mendatar) berhasil diterapkan!');
+    } else if (mode === 'paralel') {
+      reordered = layoutParalel(members);
+      showNotification('Tata Paralel (Cabang Sub-Anak 2.1, 2.2 Berkolom) berhasil diterapkan!');
+    } else if (mode === 'three_wings') {
+      reordered = layoutTrahThreeWings(members);
+      showNotification('Tata 3 Sayap (Ayah Kiri • Ibu Kanan • Inti Bawah) berhasil diterapkan!');
+    } else if (mode === 'matrix_4trah') {
+      reordered = layoutMatrix4Trah(members);
+      showNotification('Tata Matrix 4 Trah (Ayah, Ibu, Mertua Ayah, Mertua Ibu) berhasil diterapkan!');
+    }
     setMembers(reordered);
     setTimeout(() => {
       handleAutoFitAll();
-    }, 60);
-    showNotification('Silsilah 3 Sayap (Ayah Kiri • Ibu Kanan • Inti Bawah) berhasil ditata rapi!');
+    }, 80);
+  };
+
+  // Putar / Rotasi Kanvas (0, 90, 180, 270) & Orientasi Kertas
+  const handleRotateCanvas = () => {
+    setCanvasRotation(r => ((r + 90) % 360) as 0 | 90 | 180 | 270);
+    setPaperOrientation(o => (o === 'landscape' ? 'portrait' : 'landscape'));
+    showNotification('Orientasi kanvas dan kertas cetak berhasil diputar 90°!');
+  };
+
+  // Simpan Batch Anggota Baru dari BatchQuickAddModal
+  const handleBatchSaveMembers = (newMembers: FamilyMember[]) => {
+    setMembers(prev => {
+      const existingIds = new Set(prev.map(m => m.id));
+      const filtered = newMembers.filter(m => !existingIds.has(m.id));
+      const updated = [...prev, ...filtered];
+      try {
+        localStorage.setItem('wargaqu_leluhur_members_v4', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    setTimeout(() => {
+      handleAutoFitAll();
+    }, 120);
+  };
+
+  const handleApplyThreeWingsLayout = () => {
+    handleApplyLayout('three_wings');
   };
 
   const handleApplyAutoLayout = () => {
-    handleApplyThreeWingsLayout();
+    handleApplyLayout(layoutMode);
   };
 
   // Simpan Tata Letak Kanvas Secara Permanen
@@ -1833,15 +2162,27 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
     showNotification(`Tampilan disesuaikan mencakup semua (${Math.round(fitZoom * 100)}% • ${displayedMembers.length} anggota)!`);
   };
 
-  // Warna & Styling Card Berdasarkan Trah & Status Pasangan
+  // Warna & Styling Card Berdasarkan Trah, Frame Color & Status Pasangan
   const getCardStyle = (m: FamilyMember, isSelected: boolean) => {
     const isSpouse = m.relation === 'pasangan' || (m.trah === 'inti' && (m.role?.toLowerCase().includes('istri') || m.kinshipTitle?.toLowerCase().includes('istri')));
+
+    const FRAME_PALETTES: Record<string, { ring: string; border: string; bg: string }> = {
+      gold: { ring: 'ring-amber-300', border: 'border-amber-400', bg: 'bg-gradient-to-br from-[#fffdfa] to-[#fffbeb]' },
+      emerald: { ring: 'ring-emerald-300', border: 'border-emerald-500', bg: 'bg-gradient-to-br from-[#f0fdf4] to-[#ecfdf5]' },
+      sapphire: { ring: 'ring-blue-300', border: 'border-blue-500', bg: 'bg-gradient-to-br from-[#eff6ff] to-[#e0e7ff]' },
+      ruby: { ring: 'ring-rose-300', border: 'border-rose-500', bg: 'bg-gradient-to-br from-[#fff1f2] to-[#ffe4e6]' },
+      wood: { ring: 'ring-amber-700/50', border: 'border-amber-800', bg: 'bg-gradient-to-br from-[#faf8f5] to-[#f5efe6]' },
+      dark: { ring: 'ring-emerald-400/50', border: 'border-slate-600', bg: 'bg-gradient-to-br from-slate-900 to-slate-950 text-white' },
+      silver: { ring: 'ring-slate-300', border: 'border-slate-400', bg: 'bg-gradient-to-br from-[#f8fafc] to-[#f1f5f9]' }
+    };
+
+    const currentPalette = FRAME_PALETTES[frameColor] || FRAME_PALETTES.gold;
 
     if (isSpouse) {
       return {
         border: isSelected
-          ? 'border-rose-500 ring-4 ring-rose-300/60 shadow-xl z-20 bg-rose-50/30'
-          : 'border-rose-400 hover:border-rose-500 hover:shadow-lg z-10 bg-white',
+          ? `border-rose-500 ring-4 ring-rose-300/80 shadow-2xl z-20 ${currentPalette.bg}`
+          : `border-rose-400 hover:border-rose-500 hover:shadow-lg z-10 ${currentPalette.bg}`,
         badgeBg: 'bg-gradient-to-r from-rose-600 via-pink-600 to-amber-600 text-white font-extrabold',
         badgeText: '💍 Pasangan',
         noBadge: 'bg-rose-950 text-rose-200',
@@ -1852,8 +2193,8 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
     if (m.trah === 'ayah') {
       return {
         border: isSelected
-          ? 'border-blue-600 ring-4 ring-blue-300/60 shadow-xl z-20 bg-blue-50/30'
-          : 'border-blue-400 hover:border-blue-500 hover:shadow-lg z-10 bg-white',
+          ? `border-blue-600 ring-4 ${currentPalette.ring} shadow-2xl z-20 ${currentPalette.bg}`
+          : `${currentPalette.border} hover:border-blue-500 hover:shadow-lg z-10 ${currentPalette.bg}`,
         badgeBg: 'bg-blue-600 text-white font-bold',
         badgeText: 'Trah Ayah',
         noBadge: 'bg-blue-950 text-blue-200',
@@ -1864,8 +2205,8 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
     if (m.trah === 'ibu') {
       return {
         border: isSelected
-          ? 'border-purple-600 ring-4 ring-purple-300/60 shadow-xl z-20 bg-purple-50/30'
-          : 'border-purple-400 hover:border-purple-500 hover:shadow-lg z-10 bg-white',
+          ? `border-purple-600 ring-4 ${currentPalette.ring} shadow-2xl z-20 ${currentPalette.bg}`
+          : `${currentPalette.border} hover:border-purple-500 hover:shadow-lg z-10 ${currentPalette.bg}`,
         badgeBg: 'bg-purple-600 text-white font-bold',
         badgeText: 'Trah Ibu',
         noBadge: 'bg-purple-950 text-purple-200',
@@ -1873,11 +2214,23 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
       };
     }
 
+    if (m.trah === 'pasangan') {
+      return {
+        border: isSelected
+          ? `border-amber-600 ring-4 ${currentPalette.ring} shadow-2xl z-20 ${currentPalette.bg}`
+          : `${currentPalette.border} hover:border-amber-500 hover:shadow-lg z-10 ${currentPalette.bg}`,
+        badgeBg: 'bg-amber-600 text-white font-bold',
+        badgeText: 'Trah Pasangan',
+        noBadge: 'bg-amber-950 text-amber-200',
+        tagColor: 'bg-amber-100 text-amber-800 border border-amber-200'
+      };
+    }
+
     // Keluarga Inti
     return {
       border: isSelected
-        ? 'border-emerald-600 ring-4 ring-emerald-300/60 shadow-xl z-20 bg-emerald-50/30'
-        : 'border-emerald-400 hover:border-emerald-500 hover:shadow-lg z-10 bg-white',
+        ? `border-emerald-600 ring-4 ${currentPalette.ring} shadow-2xl z-20 ${currentPalette.bg}`
+        : `${currentPalette.border} hover:border-emerald-500 hover:shadow-lg z-10 ${currentPalette.bg}`,
       badgeBg: 'bg-emerald-700 text-white font-bold',
       badgeText: 'Keluarga Inti',
       noBadge: 'bg-slate-900 text-[#5eead4]',
@@ -3364,11 +3717,14 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
   const mainSpouse = members.find(m => m.trah === 'inti' && (m.relation === 'ibu' || m.role?.toLowerCase().includes('istri'))) || members.find(m => m.id === '2');
   const mainChildren = members.filter(m => m.trah === 'inti' && m.relation === 'anak');
 
-  // Filtered members for Tree View (Semua, Trah Ayah, Trah Ibu)
+  // Filtered members for Tree View (Semua, Trah Ayah, Trah Ibu, Inti, Pasangan, 4 Trah Matrix)
   const displayedMembers = members.filter(m => {
     if (treeFilter === 'all') return true;
     if (treeFilter === 'ayah') return m.trah === 'ayah' || m.trah === 'inti';
     if (treeFilter === 'ibu') return m.trah === 'ibu' || m.trah === 'inti';
+    if (treeFilter === 'inti') return m.trah === 'inti';
+    if (treeFilter === 'pasangan') return m.trah === 'pasangan' || m.relation === 'pasangan';
+    if (treeFilter === 'gabung4') return true;
     return true;
   });
 
@@ -3402,27 +3758,15 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
           </div>
         </div>
 
-        {/* Quick Top Right Actions: OrbitQu Tata Surya, Kelola KK, Buku Silsilah, Bersihkan Mock */}
+        {/* Quick Top Right Actions: Kelola KK, Buku Silsilah, Bersihkan Mock */}
         <div className="flex items-center space-x-1.5">
-          <button
-            onClick={() => setActiveTab('orbitqu')}
-            className={`active:scale-95 text-[11px] font-extrabold px-2.5 py-1.5 rounded-lg flex items-center space-x-1 transition shadow-xs ${
-              activeTab === 'orbitqu'
-                ? 'bg-amber-400 text-slate-950 font-black shadow-md ring-2 ring-amber-300'
-                : 'bg-emerald-950/50 hover:bg-emerald-950/75 text-amber-300 border border-amber-400/60'
-            }`}
-            title="Buka OrbitQu Tata Surya 6 Orbit"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-            <span>OrbitQu</span>
-          </button>
           <button
             onClick={() => handleOpenKkModal('manual')}
             className="bg-emerald-950/40 hover:bg-emerald-950/60 active:scale-95 text-white border border-emerald-400/50 text-[11px] font-bold px-2.5 py-1.5 rounded-lg flex items-center space-x-1 transition shadow-xs"
             title="Kelola & Buat Kartu Keluarga"
           >
             <Camera className="w-3.5 h-3.5 text-[#5eead4]" />
-            <span className="text-white hidden sm:inline">KK &amp; Scan</span>
+            <span className="text-white">KK &amp; Scan</span>
           </button>
           <button
             onClick={() => setShowPdfModal(true)}
@@ -3442,17 +3786,7 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
       </header>
 
       {/* SCROLLABLE MAIN CONTENT AREA */}
-      <main className={`flex-1 overflow-y-auto no-scrollbar pb-24 ${activeTab === 'orbitqu' ? 'p-0 overflow-hidden relative' : 'p-3.5 space-y-3.5'}`}>
-
-        {/* TAB 0: ORBITQU TATA SURYA KONSENTRIS (6 ORBIT & 4 KUADRAN) */}
-        {activeTab === 'orbitqu' && (
-          <div className="w-full h-full">
-            <OrbitQuView
-              onBackToLeluhurQu={() => setActiveTab('silsilah')}
-              showNotification={showNotification}
-            />
-          </div>
-        )}
+      <main className="flex-1 overflow-y-auto no-scrollbar p-3.5 space-y-3.5 pb-24">
 
         {/* TAB 1: POHON SILSILAH INTERAKTIF (TREE VIEW & MULTI-SPOUSE) */}
         {activeTab === 'silsilah' && (
@@ -3648,89 +3982,245 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
                 </div>
               </div>
 
-              {/* Trah Filter Pill Buttons (Fokus: Semua, Trah Ayah, Trah Ibu) */}
-              <div className="grid grid-cols-3 gap-1.5 bg-[#f0fdf4] p-1.5 rounded-2xl border border-emerald-200 text-xs font-bold shadow-2xs">
+              {/* Trah Filter Pill Buttons (Semua, Ayah, Ibu, Inti, Pasangan, 4 Trah Matrix) */}
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-1 bg-[#f0fdf4] p-1.5 rounded-2xl border border-emerald-200 text-[11px] font-bold shadow-2xs">
                 <button
+                  type="button"
                   onClick={() => setTreeFilter('all')}
-                  className={`py-2 px-1 rounded-xl transition flex items-center justify-center gap-1.5 text-center ${
+                  className={`py-1.5 px-1 rounded-xl transition flex items-center justify-center gap-1 text-center ${
                     treeFilter === 'all'
                       ? 'bg-emerald-700 text-white shadow-xs'
                       : 'text-slate-600 hover:text-emerald-800 hover:bg-emerald-100/60'
                   }`}
                 >
-                  <Users className="w-3.5 h-3.5" />
+                  <Users className="w-3 h-3" />
                   <span>Semua ({members.length})</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => setTreeFilter('ayah')}
-                  className={`py-2 px-1 rounded-xl transition flex items-center justify-center gap-1.5 text-center ${
+                  className={`py-1.5 px-1 rounded-xl transition flex items-center justify-center gap-1 text-center ${
                     treeFilter === 'ayah'
                       ? 'bg-blue-700 text-white shadow-xs'
                       : 'text-blue-900 hover:text-blue-700 hover:bg-blue-50'
                   }`}
                 >
-                  <span>👨 Trah Ayah ({members.filter(m => m.trah === 'ayah' || m.trah === 'inti').length})</span>
+                  <span>👨 Ayah ({members.filter(m => m.trah === 'ayah' || m.trah === 'inti').length})</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => setTreeFilter('ibu')}
-                  className={`py-2 px-1 rounded-xl transition flex items-center justify-center gap-1.5 text-center ${
+                  className={`py-1.5 px-1 rounded-xl transition flex items-center justify-center gap-1 text-center ${
                     treeFilter === 'ibu'
                       ? 'bg-purple-700 text-white shadow-xs'
                       : 'text-purple-900 hover:text-purple-700 hover:bg-purple-50'
                   }`}
                 >
-                  <span>👩 Trah Ibu ({members.filter(m => m.trah === 'ibu' || m.trah === 'inti').length})</span>
+                  <span>👩 Ibu ({members.filter(m => m.trah === 'ibu' || m.trah === 'inti').length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTreeFilter('inti')}
+                  className={`py-1.5 px-1 rounded-xl transition flex items-center justify-center gap-1 text-center ${
+                    treeFilter === 'inti'
+                      ? 'bg-emerald-800 text-white shadow-xs'
+                      : 'text-emerald-900 hover:text-emerald-700 hover:bg-emerald-50'
+                  }`}
+                >
+                  <span>🏡 Inti ({members.filter(m => m.trah === 'inti').length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTreeFilter('pasangan')}
+                  className={`py-1.5 px-1 rounded-xl transition flex items-center justify-center gap-1 text-center ${
+                    treeFilter === 'pasangan'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'text-amber-900 hover:text-amber-700 hover:bg-amber-50'
+                  }`}
+                >
+                  <span>💍 Pasangan ({members.filter(m => m.trah === 'pasangan' || m.relation === 'pasangan').length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTreeFilter('gabung4');
+                    handleApplyLayout('matrix_4trah');
+                  }}
+                  className={`py-1.5 px-1 rounded-xl transition flex items-center justify-center gap-1 text-center ${
+                    treeFilter === 'gabung4'
+                      ? 'bg-indigo-700 text-white shadow-xs ring-2 ring-indigo-300'
+                      : 'text-indigo-900 hover:text-indigo-700 hover:bg-indigo-50'
+                  }`}
+                  title="Gabung 4 Trah (Matrix X, Y: Ayah User, Ibu User, Ayah Pasangan, Ibu Pasangan)"
+                >
+                  <Crosshair className="w-3 h-3 text-amber-300" />
+                  <span>🌐 4 Trah (X,Y)</span>
                 </button>
               </div>
 
-              {/* Action Bar: Tata Trah 3 Sayap, Fullscreen, Simpan, Unduh Upscale A4-A0 & Canvas Mode */}
-              <div className="flex flex-wrap items-center justify-between gap-1.5 pt-0.5">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <button
-                    onClick={handleApplyThreeWingsLayout}
-                    className="bg-emerald-100 hover:bg-emerald-200 text-emerald-950 text-[11px] font-black px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 transition active:scale-95 border border-emerald-300 shadow-2xs"
-                    title="Tata otomatis: Trah Ayah KIRI, Trah Ibu KANAN, Keluarga Inti BAWAH"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-emerald-700" />
-                    <span>Tata Trah (3 Sayap)</span>
-                  </button>
+              {/* BARIS UTAMA: BATCH ISI CEPAT + OPSI KERTAS A0-A4 + WARNA FRAME + UKURAN FOTO + POLA SERI/PARALEL */}
+              <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 p-2.5 rounded-2xl text-white shadow-md border border-emerald-500/30 space-y-2">
+                {/* Baris 1: Tombol Batch Cepat + Pola Tata Letak */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {/* TOMBOL BATCH ISI CEPAT */}
+                    <button
+                      type="button"
+                      onClick={() => setShowBatchAddModal(true)}
+                      className="bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-600 hover:to-yellow-500 text-slate-950 text-xs font-black px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 shadow-md shadow-amber-500/30 transition active:scale-95 border border-yellow-200"
+                      title="Tambah silsilah bertingkat sekaligus: Uyut -> Anak 1..5 -> Cucu 2.1..2.3"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-900 fill-amber-900" />
+                      <span>✨ Batch Isi Cepat (Uyut &rarr; Anak &rarr; Cucu)</span>
+                    </button>
 
-                  <button
-                    onClick={toggleCanvasFullscreen}
-                    className="bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 transition active:scale-95 shadow-2xs"
-                    title="Tampilkan Kanvas Silsilah Layar Penuh (Fullscreen)"
-                  >
-                    <Maximize2 className="w-3.5 h-3.5 text-[#5eead4]" />
-                    <span>Layar Penuh</span>
-                  </button>
+                    {/* SELECTOR POLA TATA LETAK (SERI / PARALEL / 3 SAYAP / 4 TRAH) */}
+                    <div className="flex items-center gap-1 bg-white/10 px-2 py-1 rounded-xl border border-white/15 text-[11px]">
+                      <span className="text-emerald-300 font-bold">Pola:</span>
+                      <select
+                        value={layoutMode}
+                        onChange={e => handleApplyLayout(e.target.value as any)}
+                        className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
+                      >
+                        <option value="three_wings" className="text-slate-900">3 Sayap Klasik</option>
+                        <option value="seri" className="text-slate-900">Seri (1, 2, 3, 4, 5 Mendatar)</option>
+                        <option value="paralel" className="text-slate-900">Paralel (Cabang 2.1, 2.2 Berkolom)</option>
+                        <option value="matrix_4trah" className="text-slate-900">Matrix 4 Trah (X, Y 4 Kuadran)</option>
+                      </select>
+                    </div>
 
-                  <button
-                    onClick={handleSaveCanvasLayout}
-                    className="bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 text-[11px] font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 transition active:scale-95 shadow-2xs"
-                    title="Simpan Posisi Kartu & Zoom ke Penyimpanan Lokal"
-                  >
-                    <Save className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Simpan</span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => handleApplyLayout(layoutMode)}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 transition active:scale-95 shadow-xs"
+                      title="Tata ulang otomatis posisi kartu silsilah"
+                    >
+                      <Sparkles className="w-3 h-3 text-[#5eead4]" />
+                      <span>Auto Tata</span>
+                    </button>
+                  </div>
 
-                  <button
-                    onClick={() => setCanvasLayoutMode(m => m === 'modular' ? 'grid' : 'modular')}
-                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 transition"
-                  >
-                    <Layers className="w-3.5 h-3.5 text-slate-600" />
-                    <span>{canvasLayoutMode === 'modular' ? 'Kanvas' : 'Grid'}</span>
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    {/* TOMBOL PUTAR KANVAS 90° */}
+                    <button
+                      type="button"
+                      onClick={handleRotateCanvas}
+                      className="bg-white/15 hover:bg-white/25 text-white text-[11px] font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 transition active:scale-95"
+                      title="Putar orientasi kanvas & kertas 90° (Landscape <=> Portrait)"
+                    >
+                      <RotateCw className="w-3 h-3 text-amber-300" />
+                      <span>Putar 90°</span>
+                    </button>
+
+                    {/* TOMBOL SIMPAN POSISI */}
+                    <button
+                      type="button"
+                      onClick={handleSaveCanvasLayout}
+                      className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-[11px] font-black px-3 py-1.5 rounded-xl flex items-center gap-1 transition active:scale-95 shadow-sm"
+                      title="Simpan posisi kartu dan zoom ke penyimpanan perangkat"
+                    >
+                      <Save className="w-3 h-3 text-slate-950" />
+                      <span>Simpan Posisi</span>
+                    </button>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => setShowUpscaleModal(true)}
-                    className="bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-xs transition active:scale-95"
-                    title="Unduh & cetak silsilah resolusi tinggi tajam opsi A4 sampai A0"
-                  >
-                    <Download className="w-3.5 h-3.5 text-amber-200" />
-                    <span>Unduh Upscale (A4 - A0)</span>
-                  </button>
+                {/* Baris 2: Opsi Kanvas A0-A4, Warna Frame, Ukuran Card/Foto A4-A7, Export */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-white/10 text-[11px]">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* SELECTOR KERTAS KANVAS (A0 - A4) */}
+                    <div className="flex items-center gap-1 bg-white/10 px-2 py-1 rounded-xl border border-white/15">
+                      <span className="text-amber-300 font-bold">Kertas:</span>
+                      <select
+                        value={paperCanvasSize}
+                        onChange={e => {
+                          const val = e.target.value as any;
+                          setPaperCanvasSize(val);
+                          showNotification(`Bidang kanvas disesuaikan ke format ${val}!`);
+                        }}
+                        className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
+                      >
+                        <option value="A0" className="text-slate-900">A0 (Poster Akbar 1189x841 mm)</option>
+                        <option value="A1" className="text-slate-900">A1 (Poster Besar 841x594 mm)</option>
+                        <option value="A2" className="text-slate-900">A2 (Bagan Sedang 594x420 mm)</option>
+                        <option value="A3" className="text-slate-900">A3 (Buku / Meja 420x297 mm)</option>
+                        <option value="A4" className="text-slate-900">A4 (Standar HVS 297x210 mm)</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => setPaperOrientation(o => o === 'landscape' ? 'portrait' : 'landscape')}
+                        className="text-[9px] bg-white/20 hover:bg-white/30 text-amber-200 px-1.5 py-0.5 rounded ml-1 font-mono uppercase font-black"
+                        title="Ubah orientasi Mendatar / Tegak"
+                      >
+                        {paperOrientation === 'landscape' ? 'Mendatar' : 'Tegak'}
+                      </button>
+                    </div>
+
+                    {/* SELECTOR WARNA FRAME */}
+                    <div className="flex items-center gap-1 bg-white/10 px-2 py-1 rounded-xl border border-white/15">
+                      <Palette className="w-3 h-3 text-pink-300" />
+                      <span className="text-pink-200 font-bold">Frame:</span>
+                      <select
+                        value={frameColor}
+                        onChange={e => {
+                          const val = e.target.value as any;
+                          setFrameColor(val);
+                          showNotification(`Warna frame kartu diubah ke ${val}!`);
+                        }}
+                        className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
+                      >
+                        <option value="gold" className="text-slate-900">Emas Keraton (Gold)</option>
+                        <option value="emerald" className="text-slate-900">Hijau Zamrud (WargaQu)</option>
+                        <option value="sapphire" className="text-slate-900">Biru Safir Ningrat</option>
+                        <option value="ruby" className="text-slate-900">Merah Marun (Ruby)</option>
+                        <option value="wood" className="text-slate-900">Kayu Jati Cokelat</option>
+                        <option value="dark" className="text-slate-900">Hitam Onyx Modern</option>
+                        <option value="silver" className="text-slate-900">Perak Minimalis</option>
+                      </select>
+                    </div>
+
+                    {/* SELECTOR UKURAN KARTU & FOTO (A4 - A7) */}
+                    <div className="flex items-center gap-1 bg-white/10 px-2 py-1 rounded-xl border border-white/15">
+                      <span className="text-cyan-300 font-bold">Ukuran Kartu:</span>
+                      <select
+                        value={cardScale}
+                        onChange={e => {
+                          const val = e.target.value as any;
+                          setCardScale(val);
+                          showNotification(`Skala kartu diatur ke proporsi ${val}!`);
+                        }}
+                        className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
+                      >
+                        <option value="A7" className="text-slate-900">A7 - Ringkas Kompak</option>
+                        <option value="A6" className="text-slate-900">A6 - Standar Seimbang</option>
+                        <option value="A5" className="text-slate-900">A5 - Besar Jelas</option>
+                        <option value="A4" className="text-slate-900">A4 - Poster Akbar</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    {/* FULLSCREEN */}
+                    <button
+                      type="button"
+                      onClick={toggleCanvasFullscreen}
+                      className="bg-white/15 hover:bg-white/25 text-white text-[11px] font-bold px-2.5 py-1 rounded-xl flex items-center gap-1 transition active:scale-95"
+                    >
+                      <Maximize2 className="w-3 h-3 text-[#5eead4]" />
+                      <span>{isCanvasFullscreen ? 'Keluar Full' : 'Layar Penuh'}</span>
+                    </button>
+
+                    {/* UNDUH UPSCALE */}
+                    <button
+                      type="button"
+                      onClick={() => setShowUpscaleModal(true)}
+                      className="bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white text-[11px] font-black px-3 py-1 rounded-xl flex items-center gap-1 shadow-xs transition active:scale-95 border border-amber-400/40"
+                      title="Simpan untuk dicetak: Auto Upscale A4 sampai A0 agar tajam tanpa pecah"
+                    >
+                      <Download className="w-3 h-3 text-amber-200" />
+                      <span>Cetak Upscale (A4-A0)</span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -3762,17 +4252,56 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1.5">
                         <button
+                          type="button"
                           onClick={() => setEditingMember(targetCard)}
-                          className="bg-white/20 hover:bg-white/30 text-white text-[10px] font-bold px-2 py-1 rounded-lg flex items-center gap-1 transition"
+                          className="bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-md transition active:scale-95"
+                          title="Klaim kartu ini untuk melengkapi data, nomor urut, dan pas foto auto kompres"
                         >
-                          <Edit2 className="w-3 h-3" />
-                          <span>Edit</span>
+                          <Edit2 className="w-3.5 h-3.5" />
+                          <span>Klaim / Lengkapi Data</span>
                         </button>
+
+                        <label
+                          className="bg-emerald-700 hover:bg-emerald-600 text-white p-1.5 rounded-xl cursor-pointer shadow-xs transition active:scale-95 flex items-center gap-1 text-[10px] font-bold"
+                          title="Ambil Pas Foto Langsung (Kamera HP) Auto Kompres"
+                        >
+                          <Camera className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Kamera</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="user"
+                            onChange={e => {
+                              const f = e.target.files?.[0];
+                              if (f) handleCardDirectPhoto(targetCard.id, f);
+                            }}
+                            className="hidden"
+                          />
+                        </label>
+
+                        <label
+                          className="bg-white hover:bg-slate-100 text-slate-700 p-1.5 rounded-xl cursor-pointer shadow-xs transition active:scale-95 flex items-center gap-1 text-[10px] font-bold"
+                          title="Pilih Pas Foto dari Galeri HP/PC Auto Kompres"
+                        >
+                          <ImageIcon className="w-3.5 h-3.5 text-emerald-700" />
+                          <span className="hidden sm:inline">Galeri</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={e => {
+                              const f = e.target.files?.[0];
+                              if (f) handleCardDirectPhoto(targetCard.id, f);
+                            }}
+                            className="hidden"
+                          />
+                        </label>
+
                         <button
+                          type="button"
                           onClick={() => setSelectedCardId(null)}
-                          className="text-slate-400 hover:text-white p-1 rounded-lg"
+                          className="text-slate-400 hover:text-white p-1.5 rounded-xl"
                         >
                           <X className="w-4 h-4" />
                         </button>
@@ -3955,16 +4484,71 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
                     style={{
                       transform: `scale(${treeZoom})`,
                       transformOrigin: 'top left',
-                      width: '3800px',
-                      height: '2600px',
+                      width: `${canvasWidth}px`,
+                      height: `${canvasHeight}px`,
                       position: 'relative'
                     }}
                     className="transition-transform duration-100"
                   >
+                    {/* PAPER BOUNDARY GUIDE (A0 - A4) */}
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: 24,
+                        top: 24,
+                        width: `${canvasWidth - 48}px`,
+                        height: `${canvasHeight - 48}px`,
+                        pointerEvents: 'none'
+                      }}
+                      className="border-2 border-dashed border-emerald-400/40 rounded-3xl z-0"
+                    >
+                      <div className="absolute top-3 left-4 text-[10px] font-mono font-bold text-emerald-800/80 bg-white/95 backdrop-blur-xs px-2.5 py-1 rounded-lg border border-emerald-300 shadow-2xs">
+                        📐 Kertas Cetak: {paperCanvasSize} ({currentPaper.mm}) • Orientasi {paperOrientation === 'landscape' ? 'Mendatar (Landscape)' : 'Tegak (Portrait)'}
+                      </div>
+                      <div className="absolute bottom-3 right-4 text-[9px] font-mono font-bold text-slate-500 bg-white/85 px-2 py-0.5 rounded">
+                        LeluhurQu • WargaQu
+                      </div>
+                    </div>
+
+                    {/* SALIB SUMBU 4 KUADRAN (JIKA MODE MATRIX 4 TRAH ATAU FILTER GABUNG4 AKTIF) */}
+                    {(layoutMode === 'matrix_4trah' || treeFilter === 'gabung4') && (
+                      <div className="absolute inset-0 pointer-events-none z-0">
+                        {/* Garis Horizontal X */}
+                        <div
+                          style={{ top: '1300px' }}
+                          className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-blue-300 via-emerald-500 to-purple-300 opacity-60"
+                        />
+                        {/* Garis Vertikal Y */}
+                        <div
+                          style={{ left: '1800px' }}
+                          className="absolute top-0 bottom-0 w-0.5 bg-gradient-to-b from-blue-300 via-emerald-500 to-amber-300 opacity-60"
+                        />
+                        {/* Quadrant Badges */}
+                        <div className="absolute top-12 left-12 bg-blue-100/90 text-blue-900 border border-blue-300 px-3 py-1 rounded-xl text-[11px] font-black shadow-xs">
+                          KUADRAN I: TRAH AYAH (USER)
+                        </div>
+                        <div className="absolute top-12 right-12 bg-purple-100/90 text-purple-900 border border-purple-300 px-3 py-1 rounded-xl text-[11px] font-black shadow-xs">
+                          KUADRAN II: TRAH IBU (USER)
+                        </div>
+                        <div className="absolute bottom-12 left-12 bg-amber-100/90 text-amber-900 border border-amber-300 px-3 py-1 rounded-xl text-[11px] font-black shadow-xs">
+                          KUADRAN III: TRAH AYAH (PASANGAN)
+                        </div>
+                        <div className="absolute bottom-12 right-12 bg-rose-100/90 text-rose-900 border border-rose-300 px-3 py-1 rounded-xl text-[11px] font-black shadow-xs">
+                          KUADRAN IV: TRAH IBU (PASANGAN)
+                        </div>
+                        <div
+                          style={{ left: '1800px', top: '1300px', transform: 'translate(-50%, -50%)' }}
+                          className="absolute bg-emerald-700 text-white border-2 border-[#5eead4] px-3 py-1 rounded-full text-[10px] font-black shadow-lg"
+                        >
+                          TITIK TEMU: USER &amp; PASANGAN
+                        </div>
+                      </div>
+                    )}
+
                     {/* SVG Auto Family Lines (Garis Siku 90° Orthogonal Bersih di Belakang Kartu) */}
                     <svg
                       className="absolute inset-0 w-full h-full pointer-events-none z-0"
-                      style={{ width: '3800px', height: '2600px' }}
+                      style={{ width: `${canvasWidth}px`, height: `${canvasHeight}px` }}
                     >
                       <defs>
                         <marker id="arrowHead" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
@@ -4619,7 +5203,7 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
       </main>
 
       {/* BOTTOM NAVIGATION BAR KHUSUS LELUHURQU (WARGAQU EMERALD SIGNATURE THEME) */}
-      <nav className="absolute bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-emerald-100 px-2 py-2 flex justify-around items-center z-40 shadow-lg">
+      <nav className="absolute bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-emerald-100 px-3 py-2 flex justify-around items-center z-40 shadow-lg">
         {/* Tab 1: Silsilah */}
         <button
           onClick={() => setActiveTab('silsilah')}
@@ -4629,20 +5213,6 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
         >
           <GitFork className={`w-5 h-5 rotate-180 ${activeTab === 'silsilah' ? 'text-emerald-700' : 'text-slate-400'}`} />
           <span className="text-[10px]">Silsilah</span>
-        </button>
-
-        {/* Tab OrbitQu: Tata Surya */}
-        <button
-          onClick={() => setActiveTab('orbitqu')}
-          className={`flex flex-col items-center gap-1 transition active:scale-95 relative ${
-            activeTab === 'orbitqu' ? 'text-amber-500 font-extrabold' : 'text-slate-400 hover:text-amber-500 font-medium'
-          }`}
-        >
-          <div className="relative">
-            <Sparkles className={`w-5 h-5 ${activeTab === 'orbitqu' ? 'text-amber-500' : 'text-slate-400'}`} />
-            <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full animate-ping"></span>
-          </div>
-          <span className="text-[10px]">OrbitQu 🪐</span>
         </button>
 
         {/* Tab 2: Medsos Trah */}
@@ -5955,6 +6525,16 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL BATCH ISI CEPAT SILSILAH (UYUT -> ANAK 1..5 -> CUCU 2.1..2.3) */}
+      {showBatchAddModal && (
+        <BatchQuickAddModal
+          existingMembers={members}
+          onClose={() => setShowBatchAddModal(false)}
+          onSaveBatch={handleBatchSaveMembers}
+          showNotification={showNotification}
+        />
       )}
 
       {/* MODAL QUICK ADD RELATIVE (+) */}
