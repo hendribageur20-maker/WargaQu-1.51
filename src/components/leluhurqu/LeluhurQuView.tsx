@@ -60,7 +60,7 @@ import {
   Grid,
   Split
 } from 'lucide-react';
-import { BatchQuickAddModal } from './BatchQuickAddModal';
+import { BatchQuickAddModal, formatCleanDisplayTitle } from './BatchQuickAddModal';
 
 interface LeluhurQuViewProps {
   onBackToWarga: () => void;
@@ -110,6 +110,10 @@ export interface FamilyMember {
   parentId?: string;
   spouseId?: string;
   siblingId?: string;
+  batchDotId?: string; // a = ID / Kode Batch Dot Notation (disembunyikan dari layar HP)
+  batchParentDotId?: string; // d = ID Orang Tua / Relasi Atas (disembunyikan dari layar HP)
+  batchLevel?: string; // s = Generasi / Level Trah (disembunyikan dari layar HP)
+  spouseRelation?: string; // f = Status Pasangan / Simpul Relasi
 }
 
 export interface KartuKeluarga {
@@ -1475,17 +1479,32 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
     }
   }, [kkData]);
 
-  // Format rentang tahun privacy-first (Format: 'Lahir 1985' atau '1950 - 2018')
+  // Format status & rentang tahun privacy-first (Format: 'Ada (Lahir 1985)' atau 'Wafat (1950 - 2018)')
   const getYearRangeDisplay = (m: FamilyMember) => {
     if (m.status === 'Almarhum') {
-      return `${m.birthYear || '?'} - ${m.deathYear || 'Wafat'}`;
+      return m.deathYear ? `${m.birthYear || '?'} - ${m.deathYear}` : `Wafat (${m.birthYear || 'Tercatat'})`;
     }
-    return `Lahir ${m.birthYear || 'Tercatat'}`;
+    return `Ada (Lahir ${m.birthYear || 'Tercatat'})`;
+  };
+
+  // Helper Tampilan Bersih Layar HP: Hanya [Sapaan (c)] + [Nama (b)] tanpa pengulangan kata
+  const getCleanDisplayName = (m: FamilyMember): string => {
+    return formatCleanDisplayTitle(m.kinshipTitle || '', m.name || '');
   };
 
   // Nomor Anggota Auto (e.g. TA-01 untuk Trah Ayah, TI-01 untuk Trah Ibu, TK-01 untuk Inti)
+  // Aturan Pemrosesan UI: Sembunyikan semua parameter internal (a, d, s) dari penomoran
   const getMemberNo = (member: FamilyMember, allMembers: FamilyMember[] = members): string => {
-    if (member.memberNo) return member.memberNo;
+    if (member.batchDotId) {
+      const sameTrahMembers = allMembers.filter(m => m.trah === member.trah);
+      const idx = sameTrahMembers.findIndex(m => m.id === member.id);
+      const prefix = member.trah === 'ayah' ? 'TA' : member.trah === 'ibu' ? 'TI' : 'TK';
+      const num = (idx >= 0 ? idx + 1 : 1).toString().padStart(2, '0');
+      return `${prefix}-${num}`;
+    }
+    if (member.memberNo && !member.memberNo.includes('.') && !member.memberNo.startsWith('L')) {
+      return member.memberNo;
+    }
     const prefix = member.trah === 'ayah' ? 'TA' : member.trah === 'ibu' ? 'TI' : 'TK';
     const sameTrahMembers = allMembers.filter(m => m.trah === member.trah);
     const idx = sameTrahMembers.findIndex(m => m.id === member.id);
@@ -4664,12 +4683,17 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
                               </label>
                             </div>
 
-                            {/* Details: Nama, Bin/Binti, Tahun, Alamat, No HP */}
+                            {/* Details: Nama Bersih [c]+[b], Pasangan, Bin/Binti, Status, Alamat */}
                             <div className="min-w-0 flex-1 space-y-0.5">
-                              <h4 className="text-xs font-extrabold text-slate-900 leading-tight truncate" title={m.name}>
-                                {m.name}
+                              <h4 className="text-xs font-extrabold text-slate-900 leading-tight truncate" title={getCleanDisplayName(m)}>
+                                {getCleanDisplayName(m)}
                               </h4>
-                              {m.binBinti && (
+                              {m.spouseRelation && (
+                                <p className="text-[9.5px] font-bold text-rose-700 bg-rose-50 px-1.5 py-0.2 rounded border border-rose-200 truncate inline-block" title={`Pasangan: ${m.spouseRelation}`}>
+                                  💍 {m.spouseRelation}
+                                </p>
+                              )}
+                              {m.binBinti && !m.spouseRelation && (
                                 <p className="text-[10px] text-slate-500 truncate font-medium">
                                   {m.binBinti} {m.nickname ? `("${m.nickname}")` : ''}
                                 </p>
@@ -4682,7 +4706,7 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
                                     m.status === 'Almarhum' ? 'bg-slate-200 text-slate-600' : 'bg-emerald-100 text-emerald-800'
                                   }`}
                                 >
-                                  {m.status}
+                                  {m.status === 'Almarhum' ? 'Wafat' : 'Ada'}
                                 </span>
                               </div>
 
@@ -4806,8 +4830,13 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
                             )}
                           </div>
                           <div className="min-w-0 flex-1 space-y-0.5">
-                            <h4 className="text-xs font-bold text-slate-900 truncate">{m.name}</h4>
-                            <p className="text-[10px] text-slate-500 truncate">{m.binBinti || '-'}</p>
+                            <h4 className="text-xs font-bold text-slate-900 truncate" title={getCleanDisplayName(m)}>
+                              {getCleanDisplayName(m)}
+                            </h4>
+                            {m.spouseRelation && (
+                              <p className="text-[10px] font-bold text-rose-700 truncate">💍 {m.spouseRelation}</p>
+                            )}
+                            {m.binBinti && !m.spouseRelation && <p className="text-[10px] text-slate-500 truncate">{m.binBinti}</p>}
                             <p className="text-[9px] text-slate-600 font-mono font-bold">{getYearRangeDisplay(m)}</p>
                             {m.address && <p className="text-[9px] text-slate-500 truncate">📍 {m.address}</p>}
                             {m.phone && <p className="text-[9px] text-emerald-700 font-bold">📞 {m.phone}</p>}
