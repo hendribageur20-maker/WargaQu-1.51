@@ -1,0 +1,3490 @@
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import {
+  ArrowLeft,
+  Grid,
+  Plus,
+  Trash2,
+  Edit2,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  Printer,
+  Download,
+  Sparkles,
+  X,
+  Layers,
+  Circle,
+  Square,
+  Hexagon,
+  GitBranch,
+  Split,
+  Upload,
+  RefreshCw,
+  Info,
+  HelpCircle,
+  Sliders,
+  ExternalLink,
+  Camera,
+  MapPin,
+  Calendar,
+  Award,
+  Crown,
+  Star,
+  CheckCircle2,
+  UserCheck,
+  UserPlus,
+  Compass,
+  ArrowUpCircle
+} from 'lucide-react';
+import { FamilyMember } from './LeluhurQuView';
+
+export type NodeShape = 'card' | 'circle' | 'hexagon';
+export type ConnectorType = 'orthogonal' | 'bezier' | 'linear';
+export type PaperSize = 'autofit' | 'A0' | 'A1' | 'A2' | 'A3' | 'A4';
+export type PaperOrientation = 'portrait' | 'landscape';
+export type DisplaySkin = 'simple' | 'pill' | 'detailed';
+
+export interface GridSpouse {
+  id?: string;
+  name: string;
+  order?: number; // 1, 2, 3, 4
+  note?: string; // status / thn nikah / kota asal
+}
+
+export interface GridNode {
+  id: string;
+  name: string;
+  dotNotation: string;
+  gender: 'L' | 'P';
+  row: number; // 0-based generation/row level
+  col: number; // 0-based column index in grid
+  parentId?: string | null;
+  // Field spesifik sesuai permintaan:
+  photo?: string; // Base64 data URL atau URL foto profil
+  birthDeath?: string; // Tahun lahir - wafat: e.g. "1918 - 1989" atau "1975 - Sekarang"
+  domicile?: string; // Alamat Kota / Domisili: e.g. "Kuningan, Jawa Barat", "Bandung", "Jakarta"
+  honorific?: string; // Gelar Bapak/Ibu: e.g. "Bapak", "Ibu", "Bpk. H.", "Ibu Hj.", "Raden", "Eyang"
+  title?: string; // Peran tambahan / kinship
+  spouseName?: string;
+  spouses?: GridSpouse[]; // Multi-Istri (Poligini): Istri 1, Istri 2, dst.
+  spouseOrder?: number; // Istri ke-berapa jika node adalah istri
+  motherName?: string; // Nama ibu kandung jika anak dari suami beristri banyak
+  color?: string; // emerald, blue, purple, amber, rose
+  notes?: string;
+  claimedBy?: string; // Nama / email akun yang mengklaim
+}
+
+interface GridCanvasEngineProps {
+  members?: FamilyMember[];
+  onBack: () => void;
+  showNotification: (msg: string) => void;
+}
+
+// Standard Paper dimensions at 96 DPI in pixels
+const PAPER_DIMENSIONS: Record<Exclude<PaperSize, 'autofit'>, { width: number; height: number; mmW: number; mmH: number }> = {
+  A0: { width: 3179, height: 4494, mmW: 841, mmH: 1189 },
+  A1: { width: 2245, height: 3179, mmW: 594, mmH: 841 },
+  A2: { width: 1587, height: 2245, mmW: 420, mmH: 594 },
+  A3: { width: 1122, height: 1587, mmW: 297, mmH: 420 },
+  A4: { width: 794, height: 1123, mmW: 210, mmH: 297 },
+};
+
+const COLOR_MAP: Record<string, { bg: string; border: string; text: string; header: string; ring: string }> = {
+  emerald: {
+    bg: '#ecfdf5',
+    border: '#059669',
+    text: '#065f46',
+    header: '#059669',
+    ring: '#10b981',
+  },
+  blue: {
+    bg: '#eff6ff',
+    border: '#2563eb',
+    text: '#1e40af',
+    header: '#2563eb',
+    ring: '#3b82f6',
+  },
+  purple: {
+    bg: '#faf5ff',
+    border: '#9333ea',
+    text: '#6b21a8',
+    header: '#9333ea',
+    ring: '#a855f7',
+  },
+  amber: {
+    bg: '#fffbeb',
+    border: '#d97706',
+    text: '#92400e',
+    header: '#d97706',
+    ring: '#f59e0b',
+  },
+  rose: {
+    bg: '#fff1f2',
+    border: '#e11d48',
+    text: '#9f1239',
+    header: '#e11d48',
+    ring: '#f43f5e',
+  },
+};
+
+const CELL_WIDTH = 220;
+const CELL_HEIGHT = 150;
+const GRID_START_X = 80;
+const GRID_START_Y = 110;
+
+export const GridCanvasEngine: React.FC<GridCanvasEngineProps> = ({
+  members = [],
+  onBack,
+  showNotification,
+}) => {
+  // Settings
+  const [nodeShape, setNodeShape] = useState<NodeShape>('card');
+  const [displaySkin, setDisplaySkin] = useState<DisplaySkin>(() => {
+    try {
+      return (localStorage.getItem('leluhurqu_grid_display_skin') as DisplaySkin) || 'simple';
+    } catch {
+      return 'simple';
+    }
+  });
+  const [connectorType, setConnectorType] = useState<ConnectorType>('orthogonal');
+  const [paperSize, setPaperSize] = useState<PaperSize>('autofit');
+  const [orientation, setOrientation] = useState<PaperOrientation>('landscape');
+  const [showGridGuide, setShowGridGuide] = useState<boolean>(true);
+  const [highlightClaimedLineage, setHighlightClaimedLineage] = useState<boolean>(true);
+
+  // Claim Akun User State
+  const [claimedNodeId, setClaimedNodeId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('leluhurqu_grid_claimed_node_id') || 'node-4';
+    } catch {
+      return null;
+    }
+  });
+
+  const [claimedUserName, setClaimedUserName] = useState<string>(() => {
+    try {
+      return localStorage.getItem('leluhurqu_grid_claimed_user_name') || 'Hendri (Akun Saya)';
+    } catch {
+      return 'Hendri (Akun Saya)';
+    }
+  });
+
+  // Nodes Data State
+  const [nodes, setNodes] = useState<GridNode[]>(() => {
+    try {
+      const saved = localStorage.getItem('leluhurqu_grid_engine_nodes_v2');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {
+      // fallback
+    }
+
+    // Default Starter Seed Family Tree with Photo, Domicile, Honorific
+    return [
+      {
+        id: 'node-1',
+        name: 'Raden H. Kartasasmita',
+        honorific: 'Bapak H.',
+        dotNotation: '1',
+        title: 'Leluhur Utama',
+        birthDeath: '1918 - 1989',
+        domicile: 'Kuningan, Jawa Barat',
+        gender: 'L',
+        row: 0,
+        col: 2,
+        parentId: null,
+        spouseName: 'Hj. Siti Rohimah & Hj. Endang Maryam',
+        spouses: [
+          { id: 'sp-1', name: 'Hj. Siti Rohimah', order: 1, note: 'Istri Ke-1 (Kuningan)' },
+          { id: 'sp-2', name: 'Hj. Endang Maryam', order: 2, note: 'Istri Ke-2 (Cirebon)' },
+        ],
+        color: 'emerald',
+      },
+      {
+        id: 'node-2',
+        name: 'Drs. H. Ahmad Subarkah',
+        honorific: 'Bapak H.',
+        dotNotation: '1.1',
+        title: 'Anak Pertama',
+        birthDeath: '1945 - 2015',
+        domicile: 'Bandung, Jawa Barat',
+        gender: 'L',
+        row: 1,
+        col: 1,
+        parentId: 'node-1',
+        motherName: 'Hj. Siti Rohimah (Istri Ke-1)',
+        spouseName: 'Hj. Aminah Zahra',
+        color: 'blue',
+      },
+      {
+        id: 'node-3',
+        name: 'Hj. Dewi Komalasari',
+        honorific: 'Ibu Hj.',
+        dotNotation: '1.2',
+        title: 'Anak Kedua',
+        birthDeath: '1949 - Sekarang',
+        domicile: 'Cirebon, Jawa Barat',
+        gender: 'P',
+        row: 1,
+        col: 3,
+        parentId: 'node-1',
+        motherName: 'Hj. Endang Maryam (Istri Ke-2)',
+        spouseName: 'Ir. H. Dedi Sudrajat',
+        color: 'purple',
+      },
+      {
+        id: 'node-4',
+        name: 'Budi Santoso, S.T.',
+        honorific: 'Bapak',
+        dotNotation: '1.1.1',
+        title: 'Cucu',
+        birthDeath: '1975 - Sekarang',
+        domicile: 'Jakarta Selatan',
+        gender: 'L',
+        row: 2,
+        col: 0,
+        parentId: 'node-2',
+        color: 'amber',
+        claimedBy: 'Hendri (Akun Saya)',
+      },
+      {
+        id: 'node-5',
+        name: 'dr. Siti Fauziyah, Sp.A',
+        honorific: 'Ibu',
+        dotNotation: '1.1.2',
+        title: 'Cucu',
+        birthDeath: '1978 - Sekarang',
+        domicile: 'Bogor, Jawa Barat',
+        gender: 'P',
+        row: 2,
+        col: 1,
+        parentId: 'node-2',
+        color: 'rose',
+      },
+      {
+        id: 'node-6',
+        name: 'Muhammad Farhan',
+        honorific: 'Bapak',
+        dotNotation: '1.2.1',
+        title: 'Cucu',
+        birthDeath: '1982 - Sekarang',
+        domicile: 'Kuningan, Jawa Barat',
+        gender: 'L',
+        row: 2,
+        col: 3,
+        parentId: 'node-3',
+        color: 'blue',
+      },
+    ];
+  });
+
+  // Save to LocalStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('leluhurqu_grid_engine_nodes_v2', JSON.stringify(nodes));
+    } catch (e) {
+      console.error(e);
+    }
+  }, [nodes]);
+
+  useEffect(() => {
+    try {
+      if (claimedNodeId) {
+        localStorage.setItem('leluhurqu_grid_claimed_node_id', claimedNodeId);
+      } else {
+        localStorage.removeItem('leluhurqu_grid_claimed_node_id');
+      }
+      localStorage.setItem('leluhurqu_grid_claimed_user_name', claimedUserName);
+    } catch (e) {
+      console.error(e);
+    }
+  }, [claimedNodeId, claimedUserName]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('leluhurqu_grid_display_skin', displaySkin);
+    } catch (e) {
+      console.error(e);
+    }
+  }, [displaySkin]);
+
+  // Selected Node for Inspector
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+
+  // Zoom & Pan Canvas State
+  const [zoom, setZoom] = useState<number>(0.95);
+  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 30, y: 30 });
+  const [isPanning, setIsPanning] = useState<boolean>(false);
+  const panStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Dragging Node to Grid state
+  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [dragCurrentPos, setDragCurrentPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [hoverGridCell, setHoverGridCell] = useState<{ row: number; col: number } | null>(null);
+
+  // Modal / Drawer States
+  const [showBatchModal, setShowBatchModal] = useState<boolean>(false);
+  const [showAddSingleModal, setShowAddSingleModal] = useState<boolean>(false);
+  const [showAyahUyutModal, setShowAyahUyutModal] = useState<boolean>(false);
+  const [showClaimModal, setShowClaimModal] = useState<boolean>(false);
+  const [showSettingsDrawer, setShowSettingsDrawer] = useState<boolean>(false);
+  const [showHelpModal, setShowHelpModal] = useState<boolean>(false);
+
+  // Batch Input Form (Dukungan Entry Awal Default / Bebas)
+  const [batchParentId, setBatchParentId] = useState<string>(''); // '' = Bebas / Root Baru
+  const [batchStartRow, setBatchStartRow] = useState<number>(0);
+  const [batchStartPrefix, setBatchStartPrefix] = useState<string>('1');
+  const [batchDefaultHonorific, setBatchDefaultHonorific] = useState<string>('Bapak');
+  const [batchDefaultDomicile, setBatchDefaultDomicile] = useState<string>('Kuningan, Jawa Barat');
+  const [batchNames, setBatchNames] = useState<string>(
+    'Rian Pratama, Anisa Rahma, Hendra Gunawan, Putri Melati'
+  );
+  const [batchMode, setBatchMode] = useState<'comma' | 'outline'>('comma');
+  const [batchOutlineText, setBatchOutlineText] = useState<string>(
+    `1. Raden Arya [Bapak H.] (1900 - 1970) | Kuningan
+  1.1 Tirto Sasmita [Bapak] (1930 - 2005) | Bandung
+    1.1.1 Agus Tirto [Bapak] (1960 - Skrg) | Jakarta
+    1.1.2 Budi Tirto [Bapak] (1965 - Skrg) | Bogor
+  1.2 Kartini Putri [Ibu Hj.] (1935 - 2012) | Cirebon
+    1.2.1 Cantika Dewi [Ibu] (1970 - Skrg) | Bandung`
+  );
+
+  // Single Add / Edit Form
+  const [nodeFormData, setNodeFormData] = useState<Partial<GridNode>>({
+    name: '',
+    honorific: 'Bapak',
+    birthDeath: '',
+    domicile: '',
+    photo: '',
+    gender: 'L',
+    parentId: null,
+    spouseName: '',
+    color: 'emerald',
+    notes: '',
+  });
+
+  // Ayah Uyut Ditemukan Form
+  const [ayahUyutForm, setAyahUyutForm] = useState<{
+    name: string;
+    honorific: string;
+    birthDeath: string;
+    domicile: string;
+    photo: string;
+    gender: 'L' | 'P';
+    childrenIds: string[];
+    color: string;
+  }>({
+    name: 'Kyai Raden H. Masduki',
+    honorific: 'Bapak H.',
+    birthDeath: '1885 - 1952',
+    domicile: 'Kuningan, Jawa Barat',
+    photo: '',
+    gender: 'L',
+    childrenIds: ['node-1'],
+    color: 'emerald',
+  });
+
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const ayahUyutPhotoRef = useRef<HTMLInputElement | null>(null);
+
+  // Helper to get Node by ID
+  const selectedNode = useMemo(() => {
+    return nodes.find((n) => n.id === selectedNodeId) || null;
+  }, [nodes, selectedNodeId]);
+
+  // Spatial Grid Boundary Calculation
+  const maxRow = useMemo(() => {
+    if (nodes.length === 0) return 4;
+    return Math.max(...nodes.map((n) => n.row), 3);
+  }, [nodes]);
+
+  const maxCol = useMemo(() => {
+    if (nodes.length === 0) return 5;
+    return Math.max(...nodes.map((n) => n.col), 4);
+  }, [nodes]);
+
+  // Lineage path calculation for Claimed Account
+  const claimedLineagePathIds = useMemo(() => {
+    if (!claimedNodeId) return new Set<string>();
+    const path = new Set<string>();
+    let current = nodes.find((n) => n.id === claimedNodeId);
+    while (current) {
+      path.add(current.id);
+      if (current.parentId) {
+        current = nodes.find((n) => n.id === current?.parentId);
+      } else {
+        break;
+      }
+    }
+    return path;
+  }, [nodes, claimedNodeId]);
+
+  // Node pixel position from Grid Coordinate (Row, Col)
+  const getNodePosition = (row: number, col: number) => {
+    return {
+      x: GRID_START_X + col * CELL_WIDTH,
+      y: GRID_START_Y + row * CELL_HEIGHT,
+    };
+  };
+
+  // Convert pixel coord to closest Grid (Row, Col)
+  const pixelToGrid = (px: number, py: number) => {
+    const col = Math.max(0, Math.round((px - GRID_START_X) / CELL_WIDTH));
+    const row = Math.max(0, Math.round((py - GRID_START_Y) / CELL_HEIGHT));
+    return { row, col };
+  };
+
+  // Check if cell is occupied (zero collision)
+  const isCellOccupied = (row: number, col: number, excludeId?: string | null) => {
+    return nodes.some((n) => n.row === row && n.col === col && n.id !== excludeId);
+  };
+
+  // Find next vacant column in row
+  const findNextVacantCol = (row: number, startCol = 0, excludeId?: string | null) => {
+    let col = startCol;
+    while (isCellOccupied(row, col, excludeId)) {
+      col++;
+    }
+    return col;
+  };
+
+  // Re-calculate Dot-Notation automatically
+  const recomputeDotNotation = (currentNodes: GridNode[]): GridNode[] => {
+    const roots = currentNodes.filter((n) => !n.parentId).sort((a, b) => a.col - b.col);
+    const updated = [...currentNodes];
+
+    const assignNotation = (nodeId: string, notation: string) => {
+      const idx = updated.findIndex((n) => n.id === nodeId);
+      if (idx !== -1) {
+        updated[idx] = { ...updated[idx], dotNotation: notation };
+      }
+      const children = updated.filter((n) => n.parentId === nodeId).sort((a, b) => a.col - b.col);
+      children.forEach((child, i) => {
+        assignNotation(child.id, `${notation}.${i + 1}`);
+      });
+    };
+
+    roots.forEach((root, idx) => {
+      assignNotation(root.id, `${idx + 1}`);
+    });
+
+    return updated;
+  };
+
+  // Photo Compress Helper for Lightweight Base64 Offline Storage
+  const handlePhotoUpload = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    onComplete: (base64: string) => void
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_DIM = 240;
+        let w = img.width;
+        let h = img.height;
+        if (w > h) {
+          if (w > MAX_DIM) {
+            h = Math.round((h * MAX_DIM) / w);
+            w = MAX_DIM;
+          }
+        } else {
+          if (h > MAX_DIM) {
+            w = Math.round((w * MAX_DIM) / h);
+            h = MAX_DIM;
+          }
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, w, h);
+          const compressed = canvas.toDataURL('image/jpeg', 0.82);
+          onComplete(compressed);
+          showNotification('Foto profil berhasil diunggah & dikompres');
+        }
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // =========================================================================
+  // SOLUSI AYAH UYUT BARU DITEMUKAN (PREPEND TOP ANCESTOR & PUSH GENERATIONS)
+  // =========================================================================
+  const handleInsertAyahUyut = () => {
+    if (!ayahUyutForm.name.trim()) {
+      showNotification('Nama Ayah Uyut wajib diisi');
+      return;
+    }
+
+    // 1. Shift all existing nodes down by +1 row (Generasi diturunkan 1 tingkat)
+    const shiftedNodes = nodes.map((n) => ({
+      ...n,
+      row: n.row + 1,
+    }));
+
+    // 2. Tentukan posisi kolom Ayah Uyut (di atas anak-anaknya atau kolom tengah)
+    let targetCol = 2;
+    if (ayahUyutForm.childrenIds.length > 0) {
+      const childNodes = shiftedNodes.filter((n) => ayahUyutForm.childrenIds.includes(n.id));
+      if (childNodes.length > 0) {
+        const avgCol = Math.round(
+          childNodes.reduce((acc, c) => acc + c.col, 0) / childNodes.length
+        );
+        targetCol = avgCol;
+      }
+    }
+
+    const ayahUyutId = `node-uyut-${Date.now()}`;
+    const newAyahUyutNode: GridNode = {
+      id: ayahUyutId,
+      name: ayahUyutForm.name,
+      honorific: ayahUyutForm.honorific || 'Bapak H.',
+      dotNotation: '1',
+      title: 'Ayah Uyut (Leluhur Puncak)',
+      birthDeath: ayahUyutForm.birthDeath || '',
+      domicile: ayahUyutForm.domicile || '',
+      photo: ayahUyutForm.photo || '',
+      gender: ayahUyutForm.gender || 'L',
+      row: 0,
+      col: targetCol,
+      parentId: null,
+      color: ayahUyutForm.color || 'emerald',
+    };
+
+    // 3. Sambungkan anak-anak yang dipilih ke Ayah Uyut ini
+    const updatedWithChildren = shiftedNodes.map((n) => {
+      if (ayahUyutForm.childrenIds.includes(n.id)) {
+        return {
+          ...n,
+          parentId: ayahUyutId,
+        };
+      }
+      return n;
+    });
+
+    // 4. Gabungkan dan hitung ulang seluruh rantai dot-notation
+    const allUpdated = recomputeDotNotation([newAyahUyutNode, ...updatedWithChildren]);
+    setNodes(allUpdated);
+    setShowAyahUyutModal(false);
+    showNotification(
+      `✨ Solusi Berhasil: Ayah Uyut ${newAyahUyutNode.name} disisipkan di Puncak! Seluruh generasi diturunkan & nomor diperbarui.`
+    );
+  };
+
+  // =========================================================================
+  // FAST BATCH INPUT (ENTRY AWAL DEFAULT / BEBAS)
+  // =========================================================================
+  const handleAddBatch = () => {
+    if (batchMode === 'comma') {
+      const namesList = batchNames
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+
+      if (namesList.length === 0) {
+        showNotification('Masukkan minimal 1 nama');
+        return;
+      }
+
+      const parent = nodes.find((n) => n.id === batchParentId);
+      // Jika batchParentId kosong -> Entry Awal Bebas / Root Baru
+      const targetRow = parent ? parent.row + 1 : batchStartRow;
+
+      let currentNodes = [...nodes];
+      let startCol = parent ? parent.col : 0;
+
+      const colors: Array<'emerald' | 'blue' | 'purple' | 'amber' | 'rose'> = [
+        'emerald',
+        'blue',
+        'purple',
+        'amber',
+        'rose',
+      ];
+
+      namesList.forEach((rawName, i) => {
+        // Cek jika ada honorific di awal nama (misal: "Bpk. Hendra" atau "Ibu Siti")
+        let honorific = batchDefaultHonorific;
+        let cleanName = rawName;
+        if (/^(Bapak|Bpk|Pak)\b/i.test(rawName)) {
+          honorific = 'Bapak';
+          cleanName = rawName.replace(/^(Bapak|Bpk|Pak)\.?\s*/i, '');
+        } else if (/^(Ibu|Bu|Hj)\b/i.test(rawName)) {
+          honorific = 'Ibu';
+          cleanName = rawName.replace(/^(Ibu|Bu)\.?\s*/i, '');
+        }
+
+        // Cari cell kosong (Zero Collision Guarantee)
+        let col = startCol + i;
+        while (currentNodes.some((n) => n.row === targetRow && n.col === col)) {
+          col++;
+        }
+
+        const assignedColor = colors[(currentNodes.length + i) % colors.length];
+
+        const newNode: GridNode = {
+          id: `node-${Date.now()}-${i}`,
+          name: cleanName,
+          honorific,
+          dotNotation: '...',
+          birthDeath: 'Tahun Lahir - Wafat',
+          domicile: batchDefaultDomicile,
+          gender: honorific.includes('Ibu') ? 'P' : 'L',
+          row: targetRow,
+          col,
+          parentId: parent ? parent.id : null,
+          color: assignedColor,
+        };
+        currentNodes.push(newNode);
+      });
+
+      const renumbered = recomputeDotNotation(currentNodes);
+      setNodes(renumbered);
+      setShowBatchModal(false);
+      showNotification(`Berhasil menambahkan ${namesList.length} anggota secara massal`);
+    } else {
+      // Outline Parse
+      parseAndApplyOutline(batchOutlineText);
+    }
+  };
+
+  // Parse Indented / Outline text
+  const parseAndApplyOutline = (text: string) => {
+    try {
+      const lines = text.split('\n').filter((l) => l.trim().length > 0);
+      const parsedNodes: GridNode[] = [];
+      const stack: { id: string; depth: number; row: number }[] = [];
+
+      lines.forEach((line, idx) => {
+        const matchSpaces = line.match(/^(\s*)/);
+        const spaces = matchSpaces ? matchSpaces[1].length : 0;
+        const depth = Math.floor(spaces / 2);
+
+        // Ekstraksi teks: 1.1 Nama [Gelar] (1920 - 1990) | Kota
+        let lineContent = line.trim().replace(/^[\d.]+\s*/, '');
+        let honorific = 'Bapak';
+        let birthDeath = '';
+        let domicile = 'Kuningan, Jawa Barat';
+
+        // Match [Gelar]
+        const honorificMatch = lineContent.match(/\[(.*?)\]/);
+        if (honorificMatch) {
+          honorific = honorificMatch[1];
+          lineContent = lineContent.replace(/\[(.*?)\]/, '');
+        }
+
+        // Match (Tahun)
+        const yearMatch = lineContent.match(/\((.*?)\)/);
+        if (yearMatch) {
+          birthDeath = yearMatch[1];
+          lineContent = lineContent.replace(/\((.*?)\)/, '');
+        }
+
+        // Match | Kota
+        if (lineContent.includes('|')) {
+          const parts = lineContent.split('|');
+          lineContent = parts[0];
+          domicile = parts[1].trim();
+        }
+
+        const rawName = lineContent.trim() || `Anggota ${idx + 1}`;
+        const row = depth;
+
+        let col = 0;
+        while (parsedNodes.some((n) => n.row === row && n.col === col)) {
+          col++;
+        }
+
+        while (stack.length > 0 && stack[stack.length - 1].depth >= depth) {
+          stack.pop();
+        }
+        const parentId = stack.length > 0 ? stack[stack.length - 1].id : null;
+
+        const colors: Array<'emerald' | 'blue' | 'purple' | 'amber' | 'rose'> = [
+          'emerald',
+          'blue',
+          'purple',
+          'amber',
+          'rose',
+        ];
+        const assignedColor = colors[depth % colors.length];
+
+        const nodeId = `outline-${Date.now()}-${idx}`;
+        const node: GridNode = {
+          id: nodeId,
+          name: rawName,
+          honorific,
+          dotNotation: '...',
+          birthDeath: birthDeath || 'Tahun Lahir - Wafat',
+          domicile: domicile || 'Kota Domisili',
+          gender: honorific.toLowerCase().includes('ibu') ? 'P' : 'L',
+          row,
+          col,
+          parentId,
+          color: assignedColor,
+        };
+
+        parsedNodes.push(node);
+        stack.push({ id: nodeId, depth, row });
+      });
+
+      if (parsedNodes.length > 0) {
+        const renumbered = recomputeDotNotation(parsedNodes);
+        setNodes(renumbered);
+        setShowBatchModal(false);
+        showNotification(`Berhasil menyusun pohon dari teks (${parsedNodes.length} anggota)`);
+      }
+    } catch {
+      showNotification('Format outline tidak valid, cek spasi/indentasi');
+    }
+  };
+
+  // =========================================================================
+  // CLAIM SILSILAH BY AKUN
+  // =========================================================================
+  const handleClaimNode = (nodeId: string) => {
+    setClaimedNodeId(nodeId);
+    setNodes((prev) =>
+      prev.map((n) => ({
+        ...n,
+        claimedBy: n.id === nodeId ? claimedUserName : undefined,
+      }))
+    );
+    setShowClaimModal(false);
+    const target = nodes.find((n) => n.id === nodeId);
+    showNotification(
+      `⭐ Selamat! Anda berhasil mengklaim posisi silsilah: ${target?.name} (Nomor: ${target?.dotNotation})`
+    );
+  };
+
+  const handleUnclaimNode = () => {
+    setClaimedNodeId(null);
+    setNodes((prev) =>
+      prev.map((n) => ({
+        ...n,
+        claimedBy: undefined,
+      }))
+    );
+    setShowClaimModal(false);
+    showNotification('Klaim posisi akun dilepaskan');
+  };
+
+  // Drag & Drop Mouse & Touch Handlers with Zero-Collision
+  const handleNodeMouseDown = (e: React.MouseEvent, node: GridNode) => {
+    e.stopPropagation();
+    if (e.button !== 0) return;
+    setSelectedNodeId(node.id);
+    setDraggingNodeId(node.id);
+
+    const pos = getNodePosition(node.row, node.col);
+    const svgPoint = getSvgCoordinates(e.clientX, e.clientY);
+    setDragOffset({
+      x: svgPoint.x - pos.x,
+      y: svgPoint.y - pos.y,
+    });
+    setDragCurrentPos({ x: pos.x, y: pos.y });
+    setHoverGridCell({ row: node.row, col: node.col });
+  };
+
+  const handleNodeTouchStart = (e: React.TouchEvent, node: GridNode) => {
+    e.stopPropagation();
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    setSelectedNodeId(node.id);
+    setDraggingNodeId(node.id);
+
+    const pos = getNodePosition(node.row, node.col);
+    const svgPoint = getSvgCoordinates(touch.clientX, touch.clientY);
+    setDragOffset({
+      x: svgPoint.x - pos.x,
+      y: svgPoint.y - pos.y,
+    });
+    setDragCurrentPos({ x: pos.x, y: pos.y });
+    setHoverGridCell({ row: node.row, col: node.col });
+  };
+
+  const getSvgCoordinates = (clientX: number, clientY: number) => {
+    if (!svgRef.current) return { x: 0, y: 0 };
+    const rect = svgRef.current.getBoundingClientRect();
+    const x = (clientX - rect.left - pan.x) / zoom;
+    const y = (clientY - rect.top - pan.y) / zoom;
+    return { x, y };
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (draggingNodeId) {
+        const pt = getSvgCoordinates(e.clientX, e.clientY);
+        const newX = pt.x - dragOffset.x;
+        const newY = pt.y - dragOffset.y;
+        setDragCurrentPos({ x: newX, y: newY });
+        const cell = pixelToGrid(newX + CELL_WIDTH / 2, newY + CELL_HEIGHT / 2);
+        setHoverGridCell(cell);
+      } else if (isPanning) {
+        setPan({
+          x: e.clientX - panStartRef.current.x,
+          y: e.clientY - panStartRef.current.y,
+        });
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (draggingNodeId && e.touches.length === 1) {
+        const touch = e.touches[0];
+        const pt = getSvgCoordinates(touch.clientX, touch.clientY);
+        const newX = pt.x - dragOffset.x;
+        const newY = pt.y - dragOffset.y;
+        setDragCurrentPos({ x: newX, y: newY });
+        const cell = pixelToGrid(newX + CELL_WIDTH / 2, newY + CELL_HEIGHT / 2);
+        setHoverGridCell(cell);
+      } else if (isPanning && e.touches.length === 1) {
+        const touch = e.touches[0];
+        setPan({
+          x: touch.clientX - panStartRef.current.x,
+          y: touch.clientY - panStartRef.current.y,
+        });
+      }
+    };
+
+    const handleMouseUp = () => {
+      if (draggingNodeId && hoverGridCell) {
+        finishNodeDrag(draggingNodeId, hoverGridCell.row, hoverGridCell.col);
+      }
+      setDraggingNodeId(null);
+      setIsPanning(false);
+      setHoverGridCell(null);
+    };
+
+    const handleTouchEnd = () => {
+      if (draggingNodeId && hoverGridCell) {
+        finishNodeDrag(draggingNodeId, hoverGridCell.row, hoverGridCell.col);
+      }
+      setDraggingNodeId(null);
+      setIsPanning(false);
+      setHoverGridCell(null);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleTouchEnd);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [draggingNodeId, hoverGridCell, isPanning, dragOffset, pan, zoom]);
+
+  // Finish dragging with Zero Collision Guarantee
+  const finishNodeDrag = (nodeId: string, targetRow: number, targetCol: number) => {
+    const currentNode = nodes.find((n) => n.id === nodeId);
+    if (!currentNode) return;
+
+    const occupant = nodes.find(
+      (n) => n.id !== nodeId && n.row === targetRow && n.col === targetCol
+    );
+
+    let nextNodes = [...nodes];
+    if (occupant) {
+      nextNodes = nextNodes.map((n) => {
+        if (n.id === nodeId) {
+          return { ...n, row: targetRow, col: targetCol };
+        }
+        if (n.id === occupant.id) {
+          return { ...n, row: currentNode.row, col: currentNode.col };
+        }
+        return n;
+      });
+      showNotification(`Posisi ditukar dengan ${occupant.name} (Bebas Tumpang Tindih)`);
+    } else {
+      nextNodes = nextNodes.map((n) =>
+        n.id === nodeId ? { ...n, row: targetRow, col: targetCol } : n
+      );
+      showNotification(`Node dipindahkan ke Baris ${targetRow + 1}, Kolom ${targetCol + 1}`);
+    }
+
+    const renumbered = recomputeDotNotation(nextNodes);
+    setNodes(renumbered);
+  };
+
+  // Add / Edit Single Node
+  const handleSaveSingleNode = () => {
+    if (!nodeFormData.name || nodeFormData.name.trim() === '') {
+      showNotification('Nama anggota wajib diisi');
+      return;
+    }
+
+    if (selectedNodeId) {
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.id === selectedNodeId
+            ? {
+                ...n,
+                ...nodeFormData,
+                name: nodeFormData.name!,
+              }
+            : n
+        )
+      );
+      showNotification('Data anggota diperbarui');
+    } else {
+      const parent = nodes.find((n) => n.id === nodeFormData.parentId);
+      const targetRow = parent ? parent.row + 1 : 0;
+      const targetCol = findNextVacantCol(targetRow, parent ? parent.col : 0);
+
+      const newNode: GridNode = {
+        id: `node-${Date.now()}`,
+        name: nodeFormData.name,
+        honorific: nodeFormData.honorific || (nodeFormData.gender === 'P' ? 'Ibu' : 'Bapak'),
+        dotNotation: '...',
+        birthDeath: nodeFormData.birthDeath || 'Tahun Lahir - Wafat',
+        domicile: nodeFormData.domicile || 'Kota Domisili',
+        photo: nodeFormData.photo || '',
+        gender: nodeFormData.gender || 'L',
+        row: targetRow,
+        col: targetCol,
+        parentId: nodeFormData.parentId || null,
+        spouseName: nodeFormData.spouseName || '',
+        spouses: nodeFormData.spouses || undefined,
+        spouseOrder: nodeFormData.spouseOrder || undefined,
+        motherName: nodeFormData.motherName || undefined,
+        color: nodeFormData.color || 'emerald',
+        notes: nodeFormData.notes || '',
+      };
+
+      const renumbered = recomputeDotNotation([...nodes, newNode]);
+      setNodes(renumbered);
+      showNotification(`Anggota ${newNode.name} ditambahkan`);
+    }
+
+    setShowAddSingleModal(false);
+    setSelectedNodeId(null);
+  };
+
+  const handleDeleteNode = (id: string) => {
+    const target = nodes.find((n) => n.id === id);
+    if (!target) return;
+
+    const updated = nodes
+      .filter((n) => n.id !== id)
+      .map((n) => (n.parentId === id ? { ...n, parentId: target.parentId } : n));
+
+    const renumbered = recomputeDotNotation(updated);
+    setNodes(renumbered);
+    if (claimedNodeId === id) {
+      setClaimedNodeId(null);
+    }
+    setSelectedNodeId(null);
+    showNotification(`Node ${target.name} dihapus`);
+  };
+
+  const handleAutoFit = () => {
+    setZoom(0.9);
+    setPan({ x: 40, y: 40 });
+    showNotification('Tampilan disesuaikan otomatis (Fit View)');
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const handleDownloadSVG = () => {
+    if (!svgRef.current) return;
+    const serializer = new XMLSerializer();
+    let source = serializer.serializeToString(svgRef.current);
+    if (!source.match(/^<svg[^>]+xmlns="http:\/\/www\.w3\.org\/2000\/svg"/)) {
+      source = source.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
+    }
+    const blob = new Blob([source], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `LeluhurQu-GridCanvas-${Date.now()}.svg`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showNotification('Bagan SVG berhasil diunduh');
+  };
+
+  // Generate Connector Path
+  const renderConnector = (parent: GridNode, child: GridNode) => {
+    const pPos = getNodePosition(parent.row, parent.col);
+    const cPos = getNodePosition(child.row, child.col);
+
+    const isCompact = displaySkin === 'simple' || displaySkin === 'pill';
+    const pCenterX = pPos.x + CELL_WIDTH / 2;
+    const pBottomY = isCompact
+      ? pPos.y + CELL_HEIGHT / 2 + (displaySkin === 'pill' ? 20 : 28)
+      : pPos.y + CELL_HEIGHT - 22;
+
+    const cCenterX = cPos.x + CELL_WIDTH / 2;
+    const cTopY = isCompact
+      ? cPos.y + CELL_HEIGHT / 2 - (displaySkin === 'pill' ? 20 : 28)
+      : cPos.y + 12;
+
+    const isClaimedPath =
+      highlightClaimedLineage &&
+      claimedLineagePathIds.has(parent.id) &&
+      claimedLineagePathIds.has(child.id);
+
+    const strokeColor = isClaimedPath ? '#f59e0b' : '#334155';
+    const strokeWidth = isClaimedPath ? '3.5' : '2';
+
+    if (connectorType === 'linear') {
+      return (
+        <g key={`conn-${parent.id}-${child.id}`} className="transition-all duration-300">
+          <line
+            x1={pCenterX}
+            y1={pBottomY}
+            x2={cCenterX}
+            y2={cTopY}
+            stroke={strokeColor}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+          />
+          <circle cx={cCenterX} cy={cTopY} r={isClaimedPath ? '5' : '3.5'} fill={strokeColor} />
+        </g>
+      );
+    }
+
+    if (connectorType === 'bezier') {
+      const midY = (pBottomY + cTopY) / 2;
+      const pathD = `M ${pCenterX} ${pBottomY} C ${pCenterX} ${midY}, ${cCenterX} ${midY}, ${cCenterX} ${cTopY}`;
+
+      return (
+        <g key={`conn-${parent.id}-${child.id}`} className="transition-all duration-300">
+          <path
+            d={pathD}
+            fill="none"
+            stroke={strokeColor}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+          />
+          <circle cx={cCenterX} cy={cTopY} r={isClaimedPath ? '5' : '3.5'} fill={strokeColor} />
+        </g>
+      );
+    }
+
+    // Default Orthogonal
+    const midY = (pBottomY + cTopY) / 2;
+    const pathD = `M ${pCenterX} ${pBottomY} L ${pCenterX} ${midY} L ${cCenterX} ${midY} L ${cCenterX} ${cTopY}`;
+
+    return (
+      <g key={`conn-${parent.id}-${child.id}`} className="transition-all duration-300">
+        <path
+          d={pathD}
+          fill="none"
+          stroke={strokeColor}
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <circle cx={cCenterX} cy={cTopY} r={isClaimedPath ? '5' : '3.5'} fill={strokeColor} />
+      </g>
+    );
+  };
+
+  // =========================================================================
+  // RENDER NODE: HANYA TAMPIL FOTO + NAMA + TAHUN + DOMISILI + GELAR BAPAK/IBU
+  // =========================================================================
+  const renderNodeShape = (node: GridNode, isDragging: boolean) => {
+    const isSelected = selectedNodeId === node.id;
+    const isClaimed = claimedNodeId === node.id;
+    const colorScheme = COLOR_MAP[node.color || 'emerald'] || COLOR_MAP.emerald;
+
+    const honorificDisplay = node.honorific || (node.gender === 'P' ? 'Ibu' : 'Bapak');
+    const isFemale = node.gender === 'P';
+
+    // -----------------------------------------------------------------------
+    // SKIN 1: SIMPLE (HANYA MUNCUL NAMA SAJA TANPA ATRIBUT LAIN)
+    // -----------------------------------------------------------------------
+    if (displaySkin === 'simple') {
+      if (nodeShape === 'circle') {
+        const r = 42;
+        const cx = CELL_WIDTH / 2;
+        const cy = CELL_HEIGHT / 2;
+        return (
+          <g className="cursor-pointer select-none">
+            <circle
+              cx={cx}
+              cy={cy}
+              r={r}
+              fill="#ffffff"
+              stroke={isClaimed ? '#f59e0b' : isSelected ? '#047857' : colorScheme.border}
+              strokeWidth={isClaimed ? '3' : isSelected ? '2.5' : '1.8'}
+              className="filter drop-shadow-sm hover:drop-shadow-md transition"
+            />
+            {/* Dot-Notation chip */}
+            <rect
+              x={cx - 20}
+              y={cy - r - 8}
+              width="40"
+              height="16"
+              rx="8"
+              fill={isClaimed ? '#d97706' : colorScheme.header}
+            />
+            <text
+              x={cx}
+              y={cy - r + 3.5}
+              textAnchor="middle"
+              fill="#ffffff"
+              fontSize="8.5"
+              fontWeight="bold"
+              fontFamily="monospace"
+            >
+              {node.dotNotation}
+            </text>
+            {/* HANYA MUNCUL NAMA SAJA */}
+            <text
+              x={cx}
+              y={cy + 4}
+              textAnchor="middle"
+              fill="#0f172a"
+              fontSize="11.5"
+              fontWeight="bold"
+            >
+              {node.name.length > 17 ? `${node.name.slice(0, 15)}..` : node.name}
+            </text>
+            {isClaimed && (
+              <text x={cx} y={cy + 19} textAnchor="middle" fill="#f59e0b" fontSize="8.5" fontWeight="bold">
+                ★ Akun Saya
+              </text>
+            )}
+          </g>
+        );
+      }
+
+      if (nodeShape === 'hexagon') {
+        const cx = CELL_WIDTH / 2;
+        const cy = CELL_HEIGHT / 2;
+        const r = 48;
+        const points = [];
+        for (let i = 0; i < 6; i++) {
+          const angle = (Math.PI / 3) * i;
+          points.push(`${cx + r * Math.cos(angle)},${cy + r * Math.sin(angle)}`);
+        }
+        return (
+          <g className="cursor-pointer select-none">
+            <polygon
+              points={points.join(' ')}
+              fill="#ffffff"
+              stroke={isClaimed ? '#f59e0b' : isSelected ? '#047857' : colorScheme.border}
+              strokeWidth={isClaimed ? '3' : isSelected ? '2.5' : '1.8'}
+              className="filter drop-shadow-sm hover:drop-shadow-md transition"
+            />
+            <rect
+              x={cx - 20}
+              y={cy - r + 4}
+              width="40"
+              height="15"
+              rx="7.5"
+              fill={isClaimed ? '#d97706' : colorScheme.header}
+            />
+            <text
+              x={cx}
+              y={cy - r + 15}
+              textAnchor="middle"
+              fill="#ffffff"
+              fontSize="8.5"
+              fontWeight="bold"
+              fontFamily="monospace"
+            >
+              {node.dotNotation}
+            </text>
+            {/* HANYA MUNCUL NAMA SAJA */}
+            <text
+              x={cx}
+              y={cy + 5}
+              textAnchor="middle"
+              fill="#0f172a"
+              fontSize="11.5"
+              fontWeight="bold"
+            >
+              {node.name.length > 17 ? `${node.name.slice(0, 15)}..` : node.name}
+            </text>
+            {isClaimed && (
+              <text x={cx} y={cy + 20} textAnchor="middle" fill="#f59e0b" fontSize="8.5" fontWeight="bold">
+                ★ Akun Saya
+              </text>
+            )}
+          </g>
+        );
+      }
+
+      // Default Kotak Card: Skin Simple (Hanya Nama Saja)
+      const cardW = 186;
+      const cardH = 54;
+      const cardX = (CELL_WIDTH - cardW) / 2;
+      const cardY = (CELL_HEIGHT - cardH) / 2;
+
+      return (
+        <g className="cursor-pointer select-none">
+          <rect
+            x={cardX}
+            y={cardY}
+            width={cardW}
+            height={cardH}
+            rx="10"
+            fill="#ffffff"
+            stroke={isClaimed ? '#f59e0b' : isSelected ? '#047857' : colorScheme.border}
+            strokeWidth={isClaimed ? '2.5' : isSelected ? '2' : '1.5'}
+            className="filter drop-shadow-sm hover:drop-shadow-md transition"
+          />
+          {/* Left colored vertical accent strip */}
+          <path
+            d={`M ${cardX} ${cardY + 10} A 10 10 0 0 1 ${cardX + 10} ${cardY} L ${cardX + 10} ${cardY + cardH} L ${cardX} ${cardY + cardH - 10} Z`}
+            fill={isClaimed ? '#f59e0b' : colorScheme.header}
+          />
+          {/* Dot Notation chip */}
+          <rect
+            x={cardX + 14}
+            y={cardY + 6}
+            width="38"
+            height="14"
+            rx="7"
+            fill={isClaimed ? '#fef3c7' : colorScheme.bg}
+          />
+          <text
+            x={cardX + 33}
+            y={cardY + 16.5}
+            textAnchor="middle"
+            fill={isClaimed ? '#b45309' : colorScheme.text}
+            fontSize="8.5"
+            fontWeight="bold"
+            fontFamily="monospace"
+          >
+            {node.dotNotation}
+          </text>
+          {isClaimed && (
+            <text
+              x={cardX + cardW - 14}
+              y={cardY + 16}
+              textAnchor="middle"
+              fill="#f59e0b"
+              fontSize="11"
+            >
+              ★
+            </text>
+          )}
+          {/* HANYA MUNCUL NAMA SAJA (Tegas, bold, di tengah) */}
+          <text
+            x={cardX + cardW / 2}
+            y={cardY + 36}
+            textAnchor="middle"
+            fill="#0f172a"
+            fontSize="12.5"
+            fontWeight="bold"
+          >
+            {node.name.length > 20 ? `${node.name.slice(0, 18)}..` : node.name}
+          </text>
+        </g>
+      );
+    }
+
+    // -----------------------------------------------------------------------
+    // SKIN 2: KAPSUL (PILL COMPACT)
+    // -----------------------------------------------------------------------
+    if (displaySkin === 'pill') {
+      const pillW = 186;
+      const pillH = 38;
+      const pillX = (CELL_WIDTH - pillW) / 2;
+      const pillY = (CELL_HEIGHT - pillH) / 2;
+
+      return (
+        <g className="cursor-pointer select-none">
+          <rect
+            x={pillX}
+            y={pillY}
+            width={pillW}
+            height={pillH}
+            rx="19"
+            fill="#ffffff"
+            stroke={isClaimed ? '#f59e0b' : isSelected ? '#047857' : colorScheme.border}
+            strokeWidth={isClaimed ? '2.5' : isSelected ? '2' : '1.5'}
+            className="filter drop-shadow-sm hover:drop-shadow-md transition"
+          />
+          <rect
+            x={pillX + 5}
+            y={pillY + 5}
+            width="36"
+            height="28"
+            rx="14"
+            fill={isClaimed ? '#f59e0b' : colorScheme.header}
+          />
+          <text
+            x={pillX + 23}
+            y={pillY + 22}
+            textAnchor="middle"
+            fill="#ffffff"
+            fontSize="9"
+            fontWeight="bold"
+            fontFamily="monospace"
+          >
+            {node.dotNotation}
+          </text>
+          {/* Hanya Nama */}
+          <text
+            x={pillX + 48}
+            y={pillY + 23}
+            fill="#0f172a"
+            fontSize="11"
+            fontWeight="bold"
+          >
+            {node.name.length > 17 ? `${node.name.slice(0, 15)}..` : node.name}
+          </text>
+          {isClaimed && (
+            <text x={pillX + pillW - 14} y={pillY + 23} textAnchor="middle" fill="#f59e0b" fontSize="11">
+              ★
+            </text>
+          )}
+        </g>
+      );
+    }
+
+    // -----------------------------------------------------------------------
+    // SKIN 3: DETAILED (LENGKAP 5 ATRIBUT)
+    // -----------------------------------------------------------------------
+    if (nodeShape === 'circle') {
+      // 1. LINGKARAN (ORBIT STYLE)
+      const radius = 54;
+      const cx = CELL_WIDTH / 2;
+      const cy = CELL_HEIGHT / 2;
+
+      return (
+        <g className="cursor-pointer select-none">
+          {/* Outer Ring */}
+          <circle
+            cx={cx}
+            cy={cy}
+            r={radius + 8}
+            fill="none"
+            stroke={isClaimed ? '#f59e0b' : colorScheme.ring}
+            strokeWidth={isClaimed ? '2.5' : '1.5'}
+            strokeDasharray={isClaimed ? 'none' : '4 3'}
+            className={isClaimed ? 'animate-pulse' : ''}
+          />
+
+          {/* Main Circle Body */}
+          <circle
+            cx={cx}
+            cy={cy}
+            r={radius}
+            fill="#ffffff"
+            stroke={isClaimed ? '#f59e0b' : isSelected ? '#047857' : colorScheme.border}
+            strokeWidth={isClaimed || isSelected ? '3' : '2'}
+            className="filter drop-shadow-md"
+          />
+
+          {/* Top Pill: Dot-Notation + Gelar */}
+          <rect
+            x={cx - 48}
+            y={cy - radius - 10}
+            width="96"
+            height="18"
+            rx="9"
+            fill={isClaimed ? '#d97706' : colorScheme.header}
+          />
+          <text
+            x={cx}
+            y={cy - radius + 3}
+            textAnchor="middle"
+            fill="#ffffff"
+            fontSize="9"
+            fontWeight="bold"
+            fontFamily="monospace"
+          >
+            {node.dotNotation} • {honorificDisplay}
+          </text>
+
+          {/* Foto Avatar Thumbnail */}
+          {node.photo ? (
+            <clipPath id={`clip-circle-${node.id}`}>
+              <circle cx={cx} cy={cy - 12} r="18" />
+            </clipPath>
+          ) : null}
+
+          {node.photo ? (
+            <image
+              href={node.photo}
+              x={cx - 18}
+              y={cy - 30}
+              width="36"
+              height="36"
+              preserveAspectRatio="xMidYMid slice"
+              clipPath={`url(#clip-circle-${node.id})`}
+            />
+          ) : (
+            <circle
+              cx={cx}
+              cy={cy - 12}
+              r="18"
+              fill={isFemale ? '#fdf2f8' : '#eff6ff'}
+              stroke={isFemale ? '#f43f5e' : '#3b82f6'}
+              strokeWidth="1.5"
+            />
+          )}
+
+          {!node.photo && (
+            <text
+              x={cx}
+              y={cy - 7}
+              textAnchor="middle"
+              fill={isFemale ? '#e11d48' : '#1d4ed8'}
+              fontSize="12"
+              fontWeight="bold"
+            >
+              {node.name.charAt(0)}
+            </text>
+          )}
+
+          {/* Nama Lengkap */}
+          <text
+            x={cx}
+            y={cy + 15}
+            textAnchor="middle"
+            fill="#0f172a"
+            fontSize="10"
+            fontWeight="bold"
+          >
+            {node.name.length > 17 ? `${node.name.slice(0, 15)}..` : node.name}
+          </text>
+
+          {/* Tahun Lahir - Wafat */}
+          <text
+            x={cx}
+            y={cy + 27}
+            textAnchor="middle"
+            fill="#64748b"
+            fontSize="8"
+            fontWeight="medium"
+          >
+            {node.birthDeath || 'Tahun Lahir'}
+          </text>
+
+          {/* Alamat Kota / Domisili */}
+          <text
+            x={cx}
+            y={cy + 38}
+            textAnchor="middle"
+            fill="#059669"
+            fontSize="7.5"
+            fontWeight="semibold"
+          >
+            📍 {node.domicile ? (node.domicile.length > 18 ? `${node.domicile.slice(0, 16)}..` : node.domicile) : 'Domisili'}
+          </text>
+
+          {/* Claimed Account Star Indicator */}
+          {isClaimed && (
+            <g transform={`translate(${cx + radius - 14}, ${cy - radius + 8})`}>
+              <circle cx="6" cy="6" r="9" fill="#f59e0b" stroke="#ffffff" strokeWidth="1.5" />
+              <text x="6" y="9.5" textAnchor="middle" fill="#ffffff" fontSize="9" fontWeight="bold">
+                ★
+              </text>
+            </g>
+          )}
+        </g>
+      );
+    }
+
+    if (nodeShape === 'hexagon') {
+      // 2. SEGI ENAM (HEXAGON / MOLECULE STYLE)
+      const cx = CELL_WIDTH / 2;
+      const cy = CELL_HEIGHT / 2;
+      const r = 58;
+      const points = [];
+      for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI / 3) * i;
+        points.push(`${cx + r * Math.cos(angle)},${cy + r * Math.sin(angle)}`);
+      }
+
+      return (
+        <g className="cursor-pointer select-none">
+          <polygon
+            points={points.join(' ')}
+            fill="#ffffff"
+            stroke={isClaimed ? '#f59e0b' : isSelected ? '#047857' : colorScheme.border}
+            strokeWidth={isClaimed || isSelected ? '3' : '2'}
+            className="filter drop-shadow-md"
+          />
+
+          {/* Top Banner Header: Dot Notation + Gelar */}
+          <rect
+            x={cx - 45}
+            y={cy - r + 4}
+            width="90"
+            height="17"
+            rx="8.5"
+            fill={isClaimed ? '#d97706' : colorScheme.header}
+          />
+          <text
+            x={cx}
+            y={cy - r + 16}
+            textAnchor="middle"
+            fill="#ffffff"
+            fontSize="9"
+            fontWeight="bold"
+            fontFamily="monospace"
+          >
+            {node.dotNotation} • {honorificDisplay}
+          </text>
+
+          {/* Foto Avatar Thumbnail */}
+          {node.photo ? (
+            <clipPath id={`clip-hex-${node.id}`}>
+              <circle cx={cx} cy={cy - 12} r="16" />
+            </clipPath>
+          ) : null}
+
+          {node.photo ? (
+            <image
+              href={node.photo}
+              x={cx - 16}
+              y={cy - 28}
+              width="32"
+              height="32"
+              preserveAspectRatio="xMidYMid slice"
+              clipPath={`url(#clip-hex-${node.id})`}
+            />
+          ) : (
+            <circle
+              cx={cx}
+              cy={cy - 12}
+              r="16"
+              fill={isFemale ? '#fdf2f8' : '#eff6ff'}
+              stroke={isFemale ? '#f43f5e' : '#3b82f6'}
+              strokeWidth="1.5"
+            />
+          )}
+
+          {!node.photo && (
+            <text
+              x={cx}
+              y={cy - 7}
+              textAnchor="middle"
+              fill={isFemale ? '#e11d48' : '#1d4ed8'}
+              fontSize="11"
+              fontWeight="bold"
+            >
+              {node.name.charAt(0)}
+            </text>
+          )}
+
+          {/* Nama Lengkap */}
+          <text
+            x={cx}
+            y={cy + 13}
+            textAnchor="middle"
+            fill="#0f172a"
+            fontSize="10"
+            fontWeight="bold"
+          >
+            {node.name.length > 17 ? `${node.name.slice(0, 15)}..` : node.name}
+          </text>
+
+          {/* Tahun Lahir - Wafat */}
+          <text
+            x={cx}
+            y={cy + 25}
+            textAnchor="middle"
+            fill="#64748b"
+            fontSize="8"
+          >
+            {node.birthDeath || 'Tahun Lahir'}
+          </text>
+
+          {/* Alamat Kota / Domisili */}
+          <text
+            x={cx}
+            y={cy + 36}
+            textAnchor="middle"
+            fill="#059669"
+            fontSize="7.5"
+            fontWeight="semibold"
+          >
+            📍 {node.domicile ? (node.domicile.length > 18 ? `${node.domicile.slice(0, 16)}..` : node.domicile) : 'Domisili'}
+          </text>
+        </g>
+      );
+    }
+
+    // 3. DEFAULT: KOTAK ROUNDED (CARD STYLE) - PRESISI 5 ELEMEN
+    const cardWidth = 196;
+    const cardHeight = 118;
+    const cardX = (CELL_WIDTH - cardWidth) / 2;
+    const cardY = (CELL_HEIGHT - cardHeight) / 2;
+
+    return (
+      <g className="cursor-pointer select-none">
+        {/* Main Card Box */}
+        <rect
+          x={cardX}
+          y={cardY}
+          width={cardWidth}
+          height={cardHeight}
+          rx="12"
+          fill="#ffffff"
+          stroke={isClaimed ? '#f59e0b' : isSelected ? '#047857' : colorScheme.border}
+          strokeWidth={isClaimed ? '3' : isSelected ? '2.5' : '1.5'}
+          className="filter drop-shadow-md"
+        />
+
+        {/* Header Ribbon */}
+        <path
+          d={`M ${cardX} ${cardY + 12} A 12 12 0 0 1 ${cardX + 12} ${cardY} L ${cardX + cardWidth - 12} ${cardY} A 12 12 0 0 1 ${cardX + cardWidth} ${cardY + 12} L ${cardX + cardWidth} ${cardY + 26} L ${cardX} ${cardY + 26} Z`}
+          fill={isClaimed ? '#d97706' : colorScheme.header}
+        />
+
+        {/* Dot-Notation & Gelar Bapak/Ibu di Header */}
+        <text
+          x={cardX + 8}
+          y={cardY + 17}
+          fill="#ffffff"
+          fontSize="10"
+          fontWeight="bold"
+          fontFamily="monospace"
+        >
+          {node.dotNotation}
+        </text>
+
+        <rect
+          x={cardX + cardWidth - 68}
+          y={cardY + 4}
+          width="60"
+          height="18"
+          rx="9"
+          fill="#ffffff"
+          fillOpacity="0.25"
+        />
+        <text
+          x={cardX + cardWidth - 38}
+          y={cardY + 16}
+          textAnchor="middle"
+          fill="#ffffff"
+          fontSize="9"
+          fontWeight="bold"
+        >
+          {honorificDisplay}
+        </text>
+
+        {/* 1. FOTO PROFIL (AVATAR ATAU BASE64 FOTO) */}
+        {node.photo ? (
+          <clipPath id={`clip-card-${node.id}`}>
+            <rect x={cardX + 8} y={cardY + 34} width="46" height="46" rx="8" />
+          </clipPath>
+        ) : null}
+
+        {node.photo ? (
+          <image
+            href={node.photo}
+            x={cardX + 8}
+            y={cardY + 34}
+            width="46"
+            height="46"
+            preserveAspectRatio="xMidYMid slice"
+            clipPath={`url(#clip-card-${node.id})`}
+          />
+        ) : (
+          <rect
+            x={cardX + 8}
+            y={cardY + 34}
+            width="46"
+            height="46"
+            rx="8"
+            fill={isFemale ? '#fff1f2' : '#eff6ff'}
+            stroke={isFemale ? '#f43f5e' : '#3b82f6'}
+            strokeWidth="1.2"
+          />
+        )}
+
+        {!node.photo && (
+          <text
+            x={cardX + 31}
+            y={cardY + 63}
+            textAnchor="middle"
+            fill={isFemale ? '#e11d48' : '#1d4ed8'}
+            fontSize="18"
+            fontWeight="bold"
+          >
+            {node.name.charAt(0)}
+          </text>
+        )}
+
+        {/* 2. NAMA LENGKAP */}
+        <text
+          x={cardX + 60}
+          y={cardY + 48}
+          fill="#0f172a"
+          fontSize="11"
+          fontWeight="bold"
+        >
+          {node.name.length > 18 ? `${node.name.slice(0, 16)}..` : node.name}
+        </text>
+
+        {/* 3. TAHUN LAHIR - WAFAT */}
+        <text
+          x={cardX + 60}
+          y={cardY + 63}
+          fill="#475569"
+          fontSize="9"
+          fontWeight="medium"
+        >
+          📅 {node.birthDeath || 'Tahun Lahir - Wafat'}
+        </text>
+
+        {/* 4. ALAMAT KOTA / DOMISILI */}
+        <text
+          x={cardX + 60}
+          y={cardY + 77}
+          fill="#047857"
+          fontSize="8.5"
+          fontWeight="semibold"
+        >
+          📍 {node.domicile ? (node.domicile.length > 18 ? `${node.domicile.slice(0, 16)}..` : node.domicile) : 'Kota Domisili'}
+        </text>
+
+        {/* 4b. MULTI-ISTRI / IBU KANDUNG TAG */}
+        {node.gender === 'L' && node.spouses && node.spouses.length > 1 ? (
+          <text
+            x={cardX + 60}
+            y={cardY + 89}
+            fill="#e11d48"
+            fontSize="8"
+            fontWeight="bold"
+          >
+            💍 Multi-Istri ({node.spouses.length})
+          </text>
+        ) : node.motherName ? (
+          <text
+            x={cardX + 60}
+            y={cardY + 89}
+            fill="#7c3aed"
+            fontSize="8"
+            fontWeight="bold"
+          >
+            🌸 Ibu: {node.motherName.length > 16 ? `${node.motherName.slice(0, 14)}..` : node.motherName}
+          </text>
+        ) : node.gender === 'P' && node.spouseOrder ? (
+          <text
+            x={cardX + 60}
+            y={cardY + 89}
+            fill="#e11d48"
+            fontSize="8"
+            fontWeight="bold"
+          >
+            💍 Istri Ke-{node.spouseOrder}
+          </text>
+        ) : null}
+
+        {/* 5. CLAIM BADGE ATAU GRID POS */}
+        {isClaimed ? (
+          <g transform={`translate(${cardX + 8}, ${cardY + cardHeight - 24})`}>
+            <rect width="180" height="18" rx="6" fill="#fef3c7" stroke="#f59e0b" strokeWidth="1" />
+            <text x="90" y="12" textAnchor="middle" fill="#b45309" fontSize="8.5" fontWeight="bold">
+              ⭐ AKUN SAYA: {claimedUserName}
+            </text>
+          </g>
+        ) : (
+          <g transform={`translate(${cardX + 8}, ${cardY + cardHeight - 16})`}>
+            <text fill="#94a3b8" fontSize="8" fontWeight="medium">
+              {node.spouses && node.spouses.length > 1 ? `💍 ${node.spouses.length} Istri • ` : ''}Koordinat: R{node.row + 1}:C{node.col + 1}
+            </text>
+          </g>
+        )}
+      </g>
+    );
+  };
+
+  // Canvas bounds based on paper selection
+  const paperBounds = useMemo(() => {
+    if (paperSize === 'autofit') {
+      const w = Math.max((maxCol + 2) * CELL_WIDTH + GRID_START_X * 2, 1700);
+      const h = Math.max((maxRow + 2) * CELL_HEIGHT + GRID_START_Y * 2, 1100);
+      return { width: w, height: h };
+    }
+    const standard = PAPER_DIMENSIONS[paperSize];
+    if (orientation === 'landscape') {
+      return { width: standard.height, height: standard.width };
+    }
+    return { width: standard.width, height: standard.height };
+  }, [paperSize, orientation, maxCol, maxRow]);
+
+  return (
+    <div className="flex flex-col h-full bg-slate-950 text-slate-100 select-none overflow-hidden relative">
+      {/* ----------------------------------------------------------------- */}
+      {/* TOP HEADER & TOOLBAR */}
+      {/* ----------------------------------------------------------------- */}
+      <header className="bg-slate-900 border-b border-slate-800 px-3 py-2 flex items-center justify-between z-30 shadow-md">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onBack}
+            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+            title="Kembali ke LeluhurQu"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div className="flex flex-col">
+            <div className="flex items-center gap-1.5">
+              <span className="font-extrabold text-sm sm:text-base text-white tracking-wide">
+                LeluhurQu
+              </span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                Grid Canvas Engine
+              </span>
+            </div>
+            <span className="text-[10px] text-slate-400 hidden sm:inline">
+              Zero Collision • 5 Atribut Presisi • Klaim Urutan Silsilah Akun
+            </span>
+          </div>
+        </div>
+
+        {/* Action Buttons Toolbar */}
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* TOMBOL SOLUSI AYAH UYUT BARU DITEMUKAN */}
+          <button
+            onClick={() => {
+              // Pre-select current top generation roots as children
+              const rootIds = nodes.filter((n) => !n.parentId).map((n) => n.id);
+              setAyahUyutForm((prev) => ({
+                ...prev,
+                childrenIds: rootIds,
+              }));
+              setShowAyahUyutModal(true);
+            }}
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-lg text-xs font-bold shadow-md transition active:scale-95 animate-pulse"
+            title="Solusi Ayah Uyut / Leluhur Puncak Baru Ditemukan"
+          >
+            <Crown className="w-4 h-4 text-amber-200" />
+            <span className="hidden xs:inline">Ayah Uyut Ditemukan</span>
+          </button>
+
+          {/* Batch Input Fast Button */}
+          <button
+            onClick={() => {
+              setBatchParentId('');
+              setShowBatchModal(true);
+            }}
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold shadow-sm transition active:scale-95"
+            title="Input Massal (Bebas / Default)"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span className="hidden sm:inline">Input Masal</span>
+          </button>
+
+          {/* Claim Akun Button */}
+          <button
+            onClick={() => setShowClaimModal(true)}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition active:scale-95 border ${
+              claimedNodeId
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
+            }`}
+            title="Klaim Urutan Silsilah Saya by Akun"
+          >
+            <Star className={`w-4 h-4 ${claimedNodeId ? 'text-amber-400 fill-amber-400' : ''}`} />
+            <span className="hidden md:inline">
+              {claimedNodeId ? 'Akun Diklaim' : 'Klaim Akun'}
+            </span>
+          </button>
+
+          {/* Print / PDF Button */}
+          <button
+            onClick={handlePrint}
+            className="p-1.5 sm:px-2.5 sm:py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1"
+            title="Cetak Presisi / Ekspor PDF A0-A4"
+          >
+            <Printer className="w-4 h-4" />
+            <span className="hidden lg:inline">Cetak / PDF</span>
+          </button>
+
+          {/* Settings Drawer Toggle */}
+          <button
+            onClick={() => setShowSettingsDrawer((prev) => !prev)}
+            className={`p-1.5 rounded-lg border transition ${
+              showSettingsDrawer
+                ? 'bg-emerald-600 border-emerald-500 text-white'
+                : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+            }`}
+            title="Panel Pengaturan"
+          >
+            <Sliders className="w-4 h-4" />
+          </button>
+
+          {/* Help Button */}
+          <button
+            onClick={() => setShowHelpModal(true)}
+            className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700"
+            title="Petunjuk Penggunaan"
+          >
+            <HelpCircle className="w-4 h-4" />
+          </button>
+        </div>
+      </header>
+
+      {/* ----------------------------------------------------------------- */}
+      {/* SECONDARY TOOLBAR: BENTUK, GARIS, KANVAS, ZOOM */}
+      {/* ----------------------------------------------------------------- */}
+      <div className="bg-slate-900/90 border-b border-slate-800 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs z-20">
+        {/* Multi-Skin Selector (Hanya Nama Saja / Kapsul / Lengkap) */}
+        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+          <span className="text-[11px] text-slate-400 px-1 font-medium">Skin:</span>
+          <button
+            onClick={() => {
+              setDisplaySkin('simple');
+              showNotification('Skin Simple aktif: Hanya muncul Nama Saja');
+            }}
+            className={`px-2 py-1 rounded flex items-center gap-1 transition ${
+              displaySkin === 'simple'
+                ? 'bg-amber-600 text-white font-bold shadow-xs'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            title="Skin Simple: Hanya Muncul Nama Saja Tanpa Atribut Lain"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-300"></span>
+            <span>Simple (Hanya Nama)</span>
+          </button>
+          <button
+            onClick={() => {
+              setDisplaySkin('pill');
+              showNotification('Skin Kapsul aktif: Format horizontal ramping');
+            }}
+            className={`px-2 py-1 rounded flex items-center gap-1 transition ${
+              displaySkin === 'pill'
+                ? 'bg-emerald-600 text-white font-bold shadow-xs'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            title="Skin Kapsul: Nama Saja Format Kapsul Ramping"
+          >
+            <span>Kapsul</span>
+          </button>
+          <button
+            onClick={() => {
+              setDisplaySkin('detailed');
+              showNotification('Skin Lengkap aktif: 5 Atribut (Foto, Tahun, Domisili, Gelar)');
+            }}
+            className={`px-2 py-1 rounded flex items-center gap-1 transition ${
+              displaySkin === 'detailed'
+                ? 'bg-emerald-600 text-white font-bold shadow-xs'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            title="Skin Lengkap: 5 Atribut Presisi"
+          >
+            <span>Lengkap</span>
+          </button>
+        </div>
+
+        {/* Node Shape Selector */}
+        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+          <span className="text-[11px] text-slate-400 px-1 font-medium">Bentuk:</span>
+          <button
+            onClick={() => setNodeShape('card')}
+            className={`px-2 py-1 rounded flex items-center gap-1 transition ${
+              nodeShape === 'card'
+                ? 'bg-emerald-600 text-white font-bold'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Square className="w-3.5 h-3.5" />
+            <span>Kotak Card</span>
+          </button>
+          <button
+            onClick={() => setNodeShape('circle')}
+            className={`px-2 py-1 rounded flex items-center gap-1 transition ${
+              nodeShape === 'circle'
+                ? 'bg-emerald-600 text-white font-bold'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Circle className="w-3.5 h-3.5" />
+            <span>Lingkaran</span>
+          </button>
+          <button
+            onClick={() => setNodeShape('hexagon')}
+            className={`px-2 py-1 rounded flex items-center gap-1 transition ${
+              nodeShape === 'hexagon'
+                ? 'bg-emerald-600 text-white font-bold'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Hexagon className="w-3.5 h-3.5" />
+            <span>Hexagon</span>
+          </button>
+        </div>
+
+        {/* Connector Line Selector */}
+        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+          <span className="text-[11px] text-slate-400 px-1 font-medium">Garis:</span>
+          <button
+            onClick={() => setConnectorType('orthogonal')}
+            className={`px-2 py-1 rounded flex items-center gap-1 transition ${
+              connectorType === 'orthogonal'
+                ? 'bg-indigo-600 text-white font-bold'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <GitBranch className="w-3.5 h-3.5" />
+            <span>Paralel Siku</span>
+          </button>
+          <button
+            onClick={() => setConnectorType('bezier')}
+            className={`px-2 py-1 rounded flex items-center gap-1 transition ${
+              connectorType === 'bezier'
+                ? 'bg-indigo-600 text-white font-bold'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Split className="w-3.5 h-3.5" />
+            <span>Bezier</span>
+          </button>
+          <button
+            onClick={() => setConnectorType('linear')}
+            className={`px-2 py-1 rounded flex items-center gap-1 transition ${
+              connectorType === 'linear'
+                ? 'bg-indigo-600 text-white font-bold'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <span className="w-3 border-t-2 border-current inline-block" />
+            <span>Seri Lurus</span>
+          </button>
+        </div>
+
+        {/* Paper Size Preset Dropdown */}
+        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+          <span className="text-[11px] text-slate-400 px-1 font-medium">Ukuran Kanvas:</span>
+          <select
+            value={paperSize}
+            onChange={(e) => setPaperSize(e.target.value as PaperSize)}
+            className="bg-slate-900 text-slate-200 border border-slate-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-emerald-500 font-medium"
+          >
+            <option value="autofit">Auto-Fit Responsif</option>
+            <option value="A0">A0 Poster (841 x 1189 mm)</option>
+            <option value="A1">A1 (594 x 841 mm)</option>
+            <option value="A2">A2 (420 x 594 mm)</option>
+            <option value="A3">A3 (297 x 420 mm)</option>
+            <option value="A4">A4 (210 x 297 mm)</option>
+          </select>
+          {paperSize !== 'autofit' && (
+            <button
+              onClick={() =>
+                setOrientation((prev) => (prev === 'landscape' ? 'portrait' : 'landscape'))
+              }
+              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] font-bold"
+            >
+              {orientation === 'landscape' ? 'Landscape' : 'Portrait'}
+            </button>
+          )}
+        </div>
+
+        {/* Canvas Zoom Controls */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setZoom((z) => Math.max(0.3, z - 0.15))}
+            className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200"
+            title="Perkecil Kanvas"
+          >
+            <ZoomOut className="w-3.5 h-3.5" />
+          </button>
+          <span className="text-[11px] font-mono text-slate-300 w-11 text-center">
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            onClick={() => setZoom((z) => Math.min(2.5, z + 0.15))}
+            className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200"
+            title="Perbesar Kanvas"
+          >
+            <ZoomIn className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={handleAutoFit}
+            className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200"
+            title="Reset Posisi (Auto-Fit)"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* ----------------------------------------------------------------- */}
+      {/* CLAIMED ACCOUNT BANNER (IF ACTIVE) */}
+      {/* ----------------------------------------------------------------- */}
+      {claimedNodeId && (
+        <div className="bg-amber-950/40 border-b border-amber-500/30 px-3 py-1.5 flex items-center justify-between text-xs text-amber-200 z-10">
+          <div className="flex items-center gap-2">
+            <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
+            <span>
+              <strong>Urutan Silsilah Anda:</strong>{' '}
+              {nodes.find((n) => n.id === claimedNodeId)?.honorific}{' '}
+              {nodes.find((n) => n.id === claimedNodeId)?.name} (No:{' '}
+              <span className="font-mono font-bold text-amber-300">
+                {nodes.find((n) => n.id === claimedNodeId)?.dotNotation}
+              </span>
+              ) • Generasi ke-{(nodes.find((n) => n.id === claimedNodeId)?.row ?? 0) + 1}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setHighlightClaimedLineage((prev) => !prev)}
+              className="text-[11px] underline hover:text-amber-100"
+            >
+              {highlightClaimedLineage ? 'Matikan Sorot Jalur' : 'Sorot Jalur Silsilah Saya'}
+            </button>
+            <button
+              onClick={() => setShowClaimModal(true)}
+              className="px-2 py-0.5 bg-amber-600 hover:bg-amber-500 text-white rounded text-[10px] font-bold"
+            >
+              Kelola Klaim
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------------------------------------------------------- */}
+      {/* MAIN INTERACTIVE SVG CANVAS AREA */}
+      {/* ----------------------------------------------------------------- */}
+      <div
+        className="flex-1 relative overflow-hidden bg-radial from-slate-900 via-slate-950 to-black cursor-grab active:cursor-grabbing"
+        onMouseDown={(e) => {
+          if (e.target === svgRef.current || (e.target as HTMLElement).tagName === 'svg') {
+            setIsPanning(true);
+            panStartRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
+          }
+        }}
+        onTouchStart={(e) => {
+          if (e.touches.length === 1 && !draggingNodeId) {
+            setIsPanning(true);
+            const touch = e.touches[0];
+            panStartRef.current = { x: touch.clientX - pan.x, y: touch.clientY - pan.y };
+          }
+        }}
+        onWheel={(e) => {
+          e.preventDefault();
+          const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+          setZoom((z) => Math.min(2.5, Math.max(0.25, z * zoomFactor)));
+        }}
+      >
+        <svg
+          ref={svgRef}
+          id="leluhurqu-svg-canvas"
+          className="w-full h-full select-none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          {/* DEFINITIONS */}
+          <defs>
+            <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+              <feDropShadow dx="0" dy="4" stdDeviation="4" floodOpacity="0.35" floodColor="#000000" />
+            </filter>
+          </defs>
+
+          {/* MAIN TRANSFORM GROUP (PAN & ZOOM) */}
+          <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
+            {/* Paper Outline for Print Preview */}
+            {paperSize !== 'autofit' && (
+              <g id="paper-boundary-group">
+                <rect
+                  x="0"
+                  y="0"
+                  width={paperBounds.width}
+                  height={paperBounds.height}
+                  fill="#ffffff"
+                  fillOpacity="0.03"
+                  stroke="#38bdf8"
+                  strokeWidth="2"
+                  strokeDasharray="6 6"
+                />
+                <text
+                  x="14"
+                  y="24"
+                  fill="#38bdf8"
+                  fontSize="12"
+                  fontWeight="bold"
+                  fontFamily="monospace"
+                >
+                  LEMBAR CETAK {paperSize} ({orientation.toUpperCase()}) •{' '}
+                  {PAPER_DIMENSIONS[paperSize as Exclude<PaperSize, 'autofit'>].mmW} ×{' '}
+                  {PAPER_DIMENSIONS[paperSize as Exclude<PaperSize, 'autofit'>].mmH} mm
+                </text>
+              </g>
+            )}
+
+            {/* Spatial Grid Coordinates Guide */}
+            {showGridGuide && (
+              <g id="spatial-grid-guides" opacity="0.85">
+                {Array.from({ length: maxRow + 3 }).map((_, r) => {
+                  const y = GRID_START_Y + r * CELL_HEIGHT + CELL_HEIGHT / 2;
+                  return (
+                    <g key={`gen-guide-${r}`}>
+                      <text
+                        x={GRID_START_X - 16}
+                        y={y + 4}
+                        textAnchor="end"
+                        fill="#64748b"
+                        fontSize="11"
+                        fontWeight="bold"
+                        fontFamily="monospace"
+                      >
+                        GEN {r + 1}
+                      </text>
+                      <line
+                        x1={GRID_START_X - 10}
+                        y1={GRID_START_Y + r * CELL_HEIGHT}
+                        x2={GRID_START_X + (maxCol + 2) * CELL_WIDTH}
+                        y2={GRID_START_Y + r * CELL_HEIGHT}
+                        stroke="#1e293b"
+                        strokeWidth="1"
+                        strokeDasharray="3 3"
+                      />
+                    </g>
+                  );
+                })}
+
+                {Array.from({ length: maxCol + 3 }).map((_, c) => {
+                  const x = GRID_START_X + c * CELL_WIDTH;
+                  return (
+                    <text
+                      key={`col-guide-${c}`}
+                      x={x + CELL_WIDTH / 2}
+                      y={GRID_START_Y - 14}
+                      textAnchor="middle"
+                      fill="#475569"
+                      fontSize="10"
+                      fontFamily="monospace"
+                    >
+                      KOL {c + 1}
+                    </text>
+                  );
+                })}
+              </g>
+            )}
+
+            {/* Drag & Snap Hover Highlight Target Cell */}
+            {hoverGridCell && draggingNodeId && (
+              <g id="snap-preview-target">
+                <rect
+                  x={GRID_START_X + hoverGridCell.col * CELL_WIDTH + 8}
+                  y={GRID_START_Y + hoverGridCell.row * CELL_HEIGHT + 8}
+                  width={CELL_WIDTH - 16}
+                  height={CELL_HEIGHT - 16}
+                  rx="14"
+                  fill="#10b981"
+                  fillOpacity="0.18"
+                  stroke="#10b981"
+                  strokeWidth="2.5"
+                  strokeDasharray="4 4"
+                  className="animate-pulse"
+                />
+                <text
+                  x={GRID_START_X + hoverGridCell.col * CELL_WIDTH + CELL_WIDTH / 2}
+                  y={GRID_START_Y + hoverGridCell.row * CELL_HEIGHT + CELL_HEIGHT / 2 + 4}
+                  textAnchor="middle"
+                  fill="#10b981"
+                  fontSize="12"
+                  fontWeight="bold"
+                  fontFamily="monospace"
+                >
+                  Snap: R{hoverGridCell.row + 1}:C{hoverGridCell.col + 1}
+                </text>
+              </g>
+            )}
+
+            {/* 1. CONNECTOR LINES LAYER */}
+            <g id="connectors-layer">
+              {nodes.map((node) => {
+                if (!node.parentId) return null;
+                const parent = nodes.find((n) => n.id === node.parentId);
+                if (!parent) return null;
+                return renderConnector(parent, node);
+              })}
+            </g>
+
+            {/* 2. NODES LAYER */}
+            <g id="nodes-layer">
+              {nodes.map((node) => {
+                const isDragging = draggingNodeId === node.id;
+                const pos = isDragging
+                  ? dragCurrentPos
+                  : getNodePosition(node.row, node.col);
+
+                return (
+                  <g
+                    key={node.id}
+                    id={`node-${node.id}`}
+                    transform={`translate(${pos.x}, ${pos.y})`}
+                    onMouseDown={(e) => handleNodeMouseDown(e, node)}
+                    onTouchStart={(e) => handleNodeTouchStart(e, node)}
+                    opacity={isDragging ? 0.85 : 1}
+                    className="cursor-move transition-transform duration-75"
+                  >
+                    {renderNodeShape(node, isDragging)}
+                  </g>
+                );
+              })}
+            </g>
+
+            {/* Canvas Header (for Print Output) */}
+            <g id="canvas-print-kop" transform="translate(80, 40)">
+              <text
+                x="0"
+                y="0"
+                fill="#f8fafc"
+                fontSize="18"
+                fontWeight="800"
+                letterSpacing="1"
+              >
+                BAGAN SILSILAH KELUARGA BESAR
+              </text>
+              <text x="0" y="22" fill="#94a3b8" fontSize="11">
+                LeluhurQu Grid Canvas Engine • Zero Collision Matrix • Total: {nodes.length} Anggota
+              </text>
+            </g>
+          </g>
+        </svg>
+
+        {/* Floating Quick Stats */}
+        <div className="absolute bottom-4 left-4 bg-slate-900/90 backdrop-blur-md border border-slate-800 rounded-xl px-3 py-2 text-xs flex items-center gap-3 shadow-lg z-10 pointer-events-auto">
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="font-semibold text-slate-200">{nodes.length} Anggota</span>
+          </div>
+          <span className="text-slate-600">|</span>
+          <span className="text-slate-400 font-mono">
+            {maxRow + 1} Generasi • {maxCol + 1} Kolom
+          </span>
+          <span className="text-slate-600">|</span>
+          <span className="text-emerald-400 font-medium">Zero Collision</span>
+        </div>
+
+        {/* Floating Action Button */}
+        <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-10">
+          <button
+            onClick={() => {
+              setBatchParentId('');
+              setShowBatchModal(true);
+            }}
+            className="w-12 h-12 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-xl flex items-center justify-center transition active:scale-95"
+            title="Input Massal"
+          >
+            <Sparkles className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+
+      {/* ----------------------------------------------------------------- */}
+      {/* SIDEBAR: PENGATURAN BENTUK, GARIS, EKSPOR */}
+      {/* ----------------------------------------------------------------- */}
+      {showSettingsDrawer && (
+        <aside className="absolute top-12 right-0 bottom-0 w-80 sm:w-96 bg-slate-900/95 backdrop-blur-md border-l border-slate-800 p-4 overflow-y-auto z-40 shadow-2xl flex flex-col gap-4 animate-in slide-in-from-right duration-200">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-2">
+              <Sliders className="w-5 h-5 text-emerald-400" />
+              <h3 className="font-bold text-white text-base">Panel Pengaturan</h3>
+            </div>
+            <button
+              onClick={() => setShowSettingsDrawer(false)}
+              className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Section: Solusi Ayah Uyut */}
+          <div className="space-y-2 p-3 bg-amber-950/30 rounded-xl border border-amber-600/40">
+            <div className="flex items-center gap-1.5 text-amber-300 font-bold text-xs uppercase">
+              <Crown className="w-4 h-4 text-amber-400" />
+              <span>Solusi Ayah Uyut Baru Ditemukan</span>
+            </div>
+            <p className="text-[11px] text-amber-200/80 leading-relaxed">
+              Jika leluhur puncak yang lebih tua ditemukan di atas generasi saat ini, sisipkan langsung di sini tanpa merusak posisi anak-cucunya.
+            </p>
+            <button
+              onClick={() => {
+                setShowAyahUyutModal(true);
+                setShowSettingsDrawer(false);
+              }}
+              className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow"
+            >
+              <Crown className="w-3.5 h-3.5" />
+              <span>Sisipkan Ayah Uyut di Puncak</span>
+            </button>
+          </div>
+
+          {/* Section: Klaim Akun */}
+          <div className="space-y-2 p-3 bg-slate-800/60 rounded-xl border border-slate-700">
+            <div className="flex items-center gap-1.5 text-slate-200 font-bold text-xs uppercase">
+              <Star className="w-4 h-4 text-amber-400" />
+              <span>Klaim Urutan Silsilah by Akun</span>
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Tandai posisi Anda sendiri di bagan untuk menyorot jalur nasab langsung dari leluhur utama ke akun Anda.
+            </p>
+            <button
+              onClick={() => {
+                setShowClaimModal(true);
+                setShowSettingsDrawer(false);
+              }}
+              className="w-full py-2 px-3 bg-slate-700 hover:bg-slate-600 text-slate-100 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1.5"
+            >
+              <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{claimedNodeId ? 'Kelola / Ganti Klaim Akun' : 'Klaim Posisi Akun Saya'}</span>
+            </button>
+          </div>
+
+          {/* Section: Pilihan Multi Skin Tampilan */}
+          <div className="space-y-2 p-3 bg-slate-800/60 rounded-xl border border-slate-700">
+            <div className="flex items-center gap-1.5 text-slate-200 font-bold text-xs uppercase">
+              <Layers className="w-4 h-4 text-emerald-400" />
+              <span>Multi Skin Tampilan Bagan</span>
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Pilih mode tampilan node sesuai kebutuhan pohon silsilah Anda.
+            </p>
+            <div className="space-y-1.5">
+              <button
+                onClick={() => {
+                  setDisplaySkin('simple');
+                  showNotification('Skin Simple aktif: Hanya muncul Nama Saja');
+                }}
+                className={`w-full p-2 rounded-lg border text-left transition flex items-center justify-between ${
+                  displaySkin === 'simple'
+                    ? 'border-amber-500 bg-amber-950/40 text-amber-200 font-bold'
+                    : 'border-slate-700 text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                <div>
+                  <div className="text-xs">✨ Simple (Hanya Nama Saja)</div>
+                  <div className="text-[10px] text-slate-400 font-normal">
+                    Paling bersih &amp; ringkas, tanpa foto/gelar/tahun.
+                  </div>
+                </div>
+                {displaySkin === 'simple' && <CheckCircle2 className="w-4 h-4 text-amber-400" />}
+              </button>
+              <button
+                onClick={() => {
+                  setDisplaySkin('pill');
+                  showNotification('Skin Kapsul aktif: Format horizontal ramping');
+                }}
+                className={`w-full p-2 rounded-lg border text-left transition flex items-center justify-between ${
+                  displaySkin === 'pill'
+                    ? 'border-emerald-500 bg-emerald-950/40 text-emerald-200 font-bold'
+                    : 'border-slate-700 text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                <div>
+                  <div className="text-xs">💊 Kapsul (Pill Ramping)</div>
+                  <div className="text-[10px] text-slate-400 font-normal">
+                    Nama format kapsul horizontal minimalis.
+                  </div>
+                </div>
+                {displaySkin === 'pill' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+              </button>
+              <button
+                onClick={() => {
+                  setDisplaySkin('detailed');
+                  showNotification('Skin Lengkap aktif: 5 Atribut Presisi');
+                }}
+                className={`w-full p-2 rounded-lg border text-left transition flex items-center justify-between ${
+                  displaySkin === 'detailed'
+                    ? 'border-emerald-500 bg-emerald-950/40 text-emerald-200 font-bold'
+                    : 'border-slate-700 text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                <div>
+                  <div className="text-xs">📇 Lengkap (5 Atribut Presisi)</div>
+                  <div className="text-[10px] text-slate-400 font-normal">
+                    Foto, Nama, Tahun, Domisili, &amp; Gelar Bapak/Ibu.
+                  </div>
+                </div>
+                {displaySkin === 'detailed' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+              </button>
+            </div>
+          </div>
+
+          {/* Section: Preset Cetak */}
+          <div className="space-y-2 border-t border-slate-800 pt-3">
+            <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+              Cetak Presisi & Ekspor PDF
+            </label>
+            <button
+              onClick={handlePrint}
+              className="w-full py-2.5 px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow transition"
+            >
+              <Printer className="w-4 h-4" />
+              <span>Cetak / Ekspor PDF A0 - A4</span>
+            </button>
+            <button
+              onClick={handleDownloadSVG}
+              className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 border border-slate-700 transition"
+            >
+              <Download className="w-4 h-4" />
+              <span>Unduh File SVG Vektor</span>
+            </button>
+            <a
+              href="/leluhurqu-grid-canvas.html"
+              target="_blank"
+              rel="noreferrer"
+              className="w-full py-2 px-3 bg-slate-950 hover:bg-black border border-slate-800 text-slate-300 hover:text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition text-center"
+            >
+              <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Buka PWA Single-File Mandiri</span>
+            </a>
+          </div>
+
+          {/* Section: Hitung Ulang Penomoran */}
+          <div className="space-y-2 border-t border-slate-800 pt-3 mt-auto">
+            <button
+              onClick={() => {
+                const renumbered = recomputeDotNotation(nodes);
+                setNodes(renumbered);
+                showNotification('Penomoran hierarkis dot-notation dihitung ulang');
+              }}
+              className="w-full py-2 px-3 bg-emerald-950/50 hover:bg-emerald-900/60 border border-emerald-600/50 text-emerald-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Hitung Ulang Penomoran Dot-Notation</span>
+            </button>
+          </div>
+        </aside>
+      )}
+
+      {/* ----------------------------------------------------------------- */}
+      {/* INSPECTOR PANEL / MODAL UNTUK NODE TERPILIH */}
+      {/* ----------------------------------------------------------------- */}
+      {selectedNode && !draggingNodeId && (
+        <div className="absolute top-28 left-4 max-w-xs sm:w-80 bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-2xl p-4 shadow-2xl z-30 animate-in fade-in duration-150">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs font-extrabold bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/30">
+                {selectedNode.dotNotation}
+              </span>
+              <h4 className="font-bold text-white text-sm truncate max-w-[140px]">
+                {selectedNode.honorific} {selectedNode.name}
+              </h4>
+            </div>
+            <button
+              onClick={() => setSelectedNodeId(null)}
+              className="text-slate-400 hover:text-white p-1"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Foto preview */}
+          {selectedNode.photo && (
+            <div className="mb-2.5 flex justify-center">
+              <img
+                src={selectedNode.photo}
+                alt={selectedNode.name}
+                className="w-16 h-16 rounded-xl object-cover border border-slate-700 shadow"
+              />
+            </div>
+          )}
+
+          <div className="space-y-1.5 text-xs text-slate-300 mb-3">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Gelar:</span>
+              <span className="font-semibold text-emerald-400">{selectedNode.honorific || 'Bapak/Ibu'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Tahun:</span>
+              <span className="font-medium text-slate-200">{selectedNode.birthDeath || '-'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Domisili:</span>
+              <span className="font-medium text-slate-200">{selectedNode.domicile || '-'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Posisi:</span>
+              <span className="font-mono text-slate-400">
+                Gen {selectedNode.row + 1}, Kol {selectedNode.col + 1}
+              </span>
+            </div>
+            {selectedNode.claimedBy && (
+              <div className="p-1.5 bg-amber-950/40 rounded-lg border border-amber-500/30 text-amber-300 text-[11px] font-bold text-center">
+                ⭐ Diklaim oleh: {selectedNode.claimedBy}
+              </div>
+            )}
+
+            {/* Tampilan Multi-Istri jika Suami beristri lebih dari 1 */}
+            {selectedNode.spouses && selectedNode.spouses.length > 0 && (
+              <div className="bg-rose-950/40 p-2 rounded-xl border border-rose-800/40 space-y-1">
+                <div className="text-[11px] font-bold text-rose-300 flex items-center gap-1">
+                  <span>💍 Daftar Istri ({selectedNode.spouses.length}):</span>
+                </div>
+                {selectedNode.spouses.map((sp, i) => (
+                  <div key={i} className="text-[10px] text-rose-200 bg-slate-950/60 px-2 py-0.5 rounded border border-rose-900/30 flex justify-between">
+                    <span>[{sp.order || i + 1}] {sp.name}</span>
+                    {sp.note && <span className="text-slate-400">({sp.note})</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Tampilan Ibu Kandung jika anak dari suami beristri banyak */}
+            {selectedNode.motherName && (
+              <div className="bg-purple-950/40 p-1.5 rounded-lg border border-purple-800/40 text-[11px] text-purple-300">
+                🌸 Ibu Kandung: <span className="font-bold text-white">{selectedNode.motherName}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Action buttons on selected node */}
+          <div className="space-y-1.5 pt-2 border-t border-slate-800">
+            {claimedNodeId !== selectedNode.id ? (
+              <button
+                onClick={() => handleClaimNode(selectedNode.id)}
+                className="w-full py-1.5 px-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition shadow"
+              >
+                <Star className="w-3.5 h-3.5 fill-white" />
+                <span>Klaim Posisi Ini sebagai Akun Saya</span>
+              </button>
+            ) : (
+              <button
+                onClick={handleUnclaimNode}
+                className="w-full py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Lepaskan Klaim Akun</span>
+              </button>
+            )}
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => {
+                  setNodeFormData({
+                    name: selectedNode.name,
+                    honorific: selectedNode.honorific || 'Bapak',
+                    birthDeath: selectedNode.birthDeath,
+                    domicile: selectedNode.domicile,
+                    photo: selectedNode.photo,
+                    gender: selectedNode.gender,
+                    parentId: selectedNode.parentId,
+                    spouseName: selectedNode.spouseName,
+                    spouses: selectedNode.spouses || [],
+                    spouseOrder: selectedNode.spouseOrder,
+                    motherName: selectedNode.motherName,
+                    color: selectedNode.color,
+                    notes: selectedNode.notes,
+                  });
+                  setShowAddSingleModal(true);
+                }}
+                className="py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition"
+              >
+                <Edit2 className="w-3.5 h-3.5" />
+                <span>Edit Data</span>
+              </button>
+              <button
+                onClick={() => handleDeleteNode(selectedNode.id)}
+                className="py-1.5 px-2 bg-red-950/60 hover:bg-red-900 border border-red-700/60 text-red-300 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Hapus</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------------------------------------------------------- */}
+      {/* MODAL: SOLUSI AYAH UYUT BARU DITEMUKAN */}
+      {/* ----------------------------------------------------------------- */}
+      {showAyahUyutModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-amber-500/50 rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl text-slate-100 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40">
+                  <Crown className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base">
+                    Solusi: Ayah Uyut Baru Ditemukan
+                  </h3>
+                  <p className="text-xs text-amber-300/80">
+                    Sisipkan leluhur puncak di baris paling atas tanpa merusak posisi turunan
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAyahUyutModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-amber-950/30 rounded-xl border border-amber-500/30 text-xs text-amber-200 leading-relaxed">
+              <strong>Cara Kerja Solusi:</strong> Sistem akan menempatkan Ayah Uyut di baris paling atas (Generasi 1), menggeser seluruh baris generasi yang ada turun +1 tingkat secara otomatis (*zero collision*), dan menghubungkan anak-cucu yang dipilih ke Ayah Uyut ini dengan penomoran dot-notation yang baru.
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="font-semibold text-slate-300 block mb-1">Gelar Bapak/Ibu</label>
+                  <select
+                    value={ayahUyutForm.honorific}
+                    onChange={(e) =>
+                      setAyahUyutForm({ ...ayahUyutForm, honorific: e.target.value })
+                    }
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-slate-200 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="Bapak H.">Bapak H.</option>
+                    <option value="Bapak">Bapak</option>
+                    <option value="Ibu Hj.">Ibu Hj.</option>
+                    <option value="Ibu">Ibu</option>
+                    <option value="Eyang Bapak">Eyang Bapak</option>
+                    <option value="Eyang Ibu">Eyang Ibu</option>
+                    <option value="Kyai">Kyai</option>
+                    <option value="Raden">Raden</option>
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="font-semibold text-slate-300 block mb-1">Nama Lengkap Ayah Uyut *</label>
+                  <input
+                    type="text"
+                    value={ayahUyutForm.name}
+                    onChange={(e) => setAyahUyutForm({ ...ayahUyutForm, name: e.target.value })}
+                    placeholder="Contoh: Kyai Raden H. Masduki"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="font-semibold text-slate-300 block mb-1">Tahun Lahir - Wafat</label>
+                  <input
+                    type="text"
+                    value={ayahUyutForm.birthDeath}
+                    onChange={(e) =>
+                      setAyahUyutForm({ ...ayahUyutForm, birthDeath: e.target.value })
+                    }
+                    placeholder="1885 - 1952"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="font-semibold text-slate-300 block mb-1">Alamat Kota / Domisili</label>
+                  <input
+                    type="text"
+                    value={ayahUyutForm.domicile}
+                    onChange={(e) =>
+                      setAyahUyutForm({ ...ayahUyutForm, domicile: e.target.value })
+                    }
+                    placeholder="Kuningan, Jawa Barat"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              {/* Upload Foto Ayah Uyut */}
+              <div>
+                <label className="font-semibold text-slate-300 block mb-1">Foto Ayah Uyut (Opsional)</label>
+                <div className="flex items-center gap-3">
+                  {ayahUyutForm.photo ? (
+                    <img
+                      src={ayahUyutForm.photo}
+                      alt="Preview"
+                      className="w-12 h-12 rounded-xl object-cover border border-amber-500"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-500">
+                      <Camera className="w-5 h-5" />
+                    </div>
+                  )}
+                  <input
+                    type="file"
+                    ref={ayahUyutPhotoRef}
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) =>
+                      handlePhotoUpload(e, (base64) =>
+                        setAyahUyutForm({ ...ayahUyutForm, photo: base64 })
+                      )
+                    }
+                  />
+                  <button
+                    type="button"
+                    onClick={() => ayahUyutPhotoRef.current?.click()}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold border border-slate-700"
+                  >
+                    Unggah Foto Profil
+                  </button>
+                  {ayahUyutForm.photo && (
+                    <button
+                      type="button"
+                      onClick={() => setAyahUyutForm({ ...ayahUyutForm, photo: '' })}
+                      className="text-xs text-red-400 hover:underline"
+                    >
+                      Hapus
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Pilih Siapa Anak dari Ayah Uyut Ini */}
+              <div>
+                <label className="font-semibold text-slate-300 block mb-1">
+                  Pilih Siapa Anak Kandung dari Ayah Uyut ini:
+                </label>
+                <div className="space-y-1.5 max-h-36 overflow-y-auto p-2 bg-slate-950 rounded-xl border border-slate-800">
+                  {nodes
+                    .filter((n) => !n.parentId || n.row === 0)
+                    .map((rootNode) => (
+                      <label
+                        key={rootNode.id}
+                        className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-900 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={ayahUyutForm.childrenIds.includes(rootNode.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setAyahUyutForm({
+                                ...ayahUyutForm,
+                                childrenIds: [...ayahUyutForm.childrenIds, rootNode.id],
+                              });
+                            } else {
+                              setAyahUyutForm({
+                                ...ayahUyutForm,
+                                childrenIds: ayahUyutForm.childrenIds.filter(
+                                  (id) => id !== rootNode.id
+                                ),
+                              });
+                            }
+                          }}
+                          className="rounded text-amber-600 focus:ring-amber-500"
+                        />
+                        <span className="font-semibold text-slate-200">
+                          {rootNode.dotNotation} - {rootNode.honorific} {rootNode.name}
+                        </span>
+                        <span className="text-[10px] text-slate-500">
+                          (Saat ini Gen {rootNode.row + 1})
+                        </span>
+                      </label>
+                    ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2 border-t border-slate-800">
+              <button
+                onClick={() => setShowAyahUyutModal(false)}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-semibold text-xs transition"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleInsertAyahUyut}
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white font-bold text-xs transition shadow-lg active:scale-95"
+              >
+                Terapkan Solusi di Puncak
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------------------------------------------------------- */}
+      {/* MODAL: INPUT MASAL - ENTRY AWAL DEFAULT / BEBAS */}
+      {/* ----------------------------------------------------------------- */}
+      {showBatchModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl text-slate-100 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-emerald-600/20 text-emerald-400 border border-emerald-500/30">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base">Input Massal (Fast Batch)</h3>
+                  <p className="text-xs text-slate-400">
+                    Dukungan entry awal bebas / tanpa induk, maupun di bawah cabang
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowBatchModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Batch Mode Switch */}
+            <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800">
+              <button
+                onClick={() => setBatchMode('comma')}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  batchMode === 'comma' ? 'bg-emerald-600 text-white' : 'text-slate-400'
+                }`}
+              >
+                Pisah Koma (Cepat)
+              </button>
+              <button
+                onClick={() => setBatchMode('outline')}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  batchMode === 'outline' ? 'bg-emerald-600 text-white' : 'text-slate-400'
+                }`}
+              >
+                Pohon Teks Indentasi (Lengkap)
+              </button>
+            </div>
+
+            {batchMode === 'comma' ? (
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="font-semibold text-slate-300 block mb-1">
+                    Posisi Masukan / Induk Cabang:
+                  </label>
+                  <select
+                    value={batchParentId}
+                    onChange={(e) => setBatchParentId(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="">
+                      ⭐ [Entry Awal Bebas] Generasi Paling Atas / Root Mandiri
+                    </option>
+                    {nodes.map((n) => (
+                      <option key={n.id} value={n.id}>
+                        Anak dari: {n.dotNotation} - {n.honorific} {n.name} (Gen {n.row + 1})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="font-semibold text-slate-300 block mb-1">
+                      Gelar Default
+                    </label>
+                    <select
+                      value={batchDefaultHonorific}
+                      onChange={(e) => setBatchDefaultHonorific(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-slate-200"
+                    >
+                      <option value="Bapak">Bapak</option>
+                      <option value="Ibu">Ibu</option>
+                      <option value="Bapak H.">Bapak H.</option>
+                      <option value="Ibu Hj.">Ibu Hj.</option>
+                      <option value="Raden">Raden</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="font-semibold text-slate-300 block mb-1">
+                      Kota / Domisili Default
+                    </label>
+                    <input
+                      type="text"
+                      value={batchDefaultDomicile}
+                      onChange={(e) => setBatchDefaultDomicile(e.target.value)}
+                      placeholder="Kuningan, Jawa Barat"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-slate-200"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="font-semibold text-slate-300 block mb-1">
+                    Daftar Nama Anggota (Dipisah Tanda Koma):
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={batchNames}
+                    onChange={(e) => setBatchNames(e.target.value)}
+                    placeholder="Contoh: Rian Pratama, Anisa Rahma, Hendra Gunawan, Putri Melati"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    * Sistem otomatis memberi nomor rantai seperti 1.1, 1.2, 1.3 dan menempatkan pada kolom kosong tanpa tumpang tindih (*Zero Collision*).
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2 text-xs">
+                <label className="font-semibold text-slate-300 block">
+                  Tempel Pohon Keluarga (Format: Nama [Gelar] (Tahun) | Kota):
+                </label>
+                <textarea
+                  rows={6}
+                  value={batchOutlineText}
+                  onChange={(e) => setBatchOutlineText(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-emerald-400 font-mono focus:outline-none focus:border-emerald-500 resize-none"
+                />
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-2 border-t border-slate-800">
+              <button
+                onClick={() => setShowBatchModal(false)}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-semibold text-xs"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleAddBatch}
+                className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg active:scale-95"
+              >
+                Tambahkan Massal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------------------------------------------------------- */}
+      {/* MODAL: KLAIM URUTAN SILSILAH BY AKUN */}
+      {/* ----------------------------------------------------------------- */}
+      {showClaimModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-amber-500/50 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl text-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                  <Star className="w-5 h-5 fill-amber-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base">Klaim Urutan Silsilah</h3>
+                  <p className="text-xs text-slate-400">Hubungkan posisi Anda di bagan keluarga</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowClaimModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="font-semibold text-slate-300 block mb-1">
+                  Nama Akun / Pengguna Anda:
+                </label>
+                <input
+                  type="text"
+                  value={claimedUserName}
+                  onChange={(e) => setClaimedUserName(e.target.value)}
+                  placeholder="Contoh: Hendri (Akun Saya)"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-300 block mb-1">
+                  Pilih Node Silsilah yang Merupakan Posisi Anda:
+                </label>
+                <select
+                  value={claimedNodeId || ''}
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      handleClaimNode(e.target.value);
+                    } else {
+                      handleUnclaimNode();
+                    }
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="">-- Belum Diklaim / Pilih Anggota --</option>
+                  {nodes.map((n) => (
+                    <option key={n.id} value={n.id}>
+                      {n.dotNotation} - {n.honorific} {n.name} (Gen {n.row + 1})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {claimedNodeId && (
+                <div className="p-3 bg-amber-950/30 rounded-xl border border-amber-500/30 text-amber-200 space-y-1">
+                  <div className="font-bold text-amber-300">Status Klaim Terpasang:</div>
+                  <div>
+                    Akun Anda terhubung dengan:{' '}
+                    <strong>
+                      {nodes.find((n) => n.id === claimedNodeId)?.honorific}{' '}
+                      {nodes.find((n) => n.id === claimedNodeId)?.name}
+                    </strong>{' '}
+                    (Nomor Dot-Notation:{' '}
+                    <span className="font-mono">
+                      {nodes.find((n) => n.id === claimedNodeId)?.dotNotation}
+                    </span>
+                    )
+                  </div>
+                  <div className="text-[11px] text-amber-400/80">
+                    * Garis konektor dari leluhur puncak menuju posisi Anda akan disorot warna emas secara otomatis.
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2 pt-2 border-t border-slate-800">
+              {claimedNodeId && (
+                <button
+                  onClick={handleUnclaimNode}
+                  className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs"
+                >
+                  Lepas Klaim
+                </button>
+              )}
+              <button
+                onClick={() => setShowClaimModal(false)}
+                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs"
+              >
+                Selesai
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------------------------------------------------------- */}
+      {/* MODAL: TAMBAH / EDIT SINGLE NODE (5 ELEMEN PRESISI) */}
+      {/* ----------------------------------------------------------------- */}
+      {showAddSingleModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl text-slate-100 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="font-bold text-white text-base">
+                {selectedNodeId ? 'Edit Data Anggota' : 'Tambah Anggota Baru'}
+              </h3>
+              <button
+                onClick={() => setShowAddSingleModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="font-semibold text-slate-300 block mb-1">Gelar Bapak/Ibu</label>
+                  <select
+                    value={nodeFormData.honorific || 'Bapak'}
+                    onChange={(e) =>
+                      setNodeFormData({
+                        ...nodeFormData,
+                        honorific: e.target.value,
+                        gender: e.target.value.toLowerCase().includes('ibu') ? 'P' : 'L',
+                      })
+                    }
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-slate-200"
+                  >
+                    <option value="Bapak">Bapak</option>
+                    <option value="Ibu">Ibu</option>
+                    <option value="Bapak H.">Bapak H.</option>
+                    <option value="Ibu Hj.">Ibu Hj.</option>
+                    <option value="Eyang Bapak">Eyang Bapak</option>
+                    <option value="Eyang Ibu">Eyang Ibu</option>
+                    <option value="Raden">Raden</option>
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="font-semibold text-slate-300 block mb-1">Nama Lengkap *</label>
+                  <input
+                    type="text"
+                    value={nodeFormData.name || ''}
+                    onChange={(e) => setNodeFormData({ ...nodeFormData, name: e.target.value })}
+                    placeholder="Contoh: Raden Mas Danang"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="font-semibold text-slate-300 block mb-1">Tahun Lahir - Wafat</label>
+                  <input
+                    type="text"
+                    value={nodeFormData.birthDeath || ''}
+                    onChange={(e) =>
+                      setNodeFormData({ ...nodeFormData, birthDeath: e.target.value })
+                    }
+                    placeholder="1955 - 2021 / 1980"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100"
+                  />
+                </div>
+                <div>
+                  <label className="font-semibold text-slate-300 block mb-1">Alamat Kota / Domisili</label>
+                  <input
+                    type="text"
+                    value={nodeFormData.domicile || ''}
+                    onChange={(e) =>
+                      setNodeFormData({ ...nodeFormData, domicile: e.target.value })
+                    }
+                    placeholder="Kuningan, Jawa Barat"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100"
+                  />
+                </div>
+              </div>
+
+              {/* Upload Foto */}
+              <div>
+                <label className="font-semibold text-slate-300 block mb-1">Foto Profil Anggota</label>
+                <div className="flex items-center gap-3">
+                  {nodeFormData.photo ? (
+                    <img
+                      src={nodeFormData.photo}
+                      alt="Preview"
+                      className="w-12 h-12 rounded-xl object-cover border border-emerald-500"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-500">
+                      <Camera className="w-5 h-5" />
+                    </div>
+                  )}
+                  <input
+                    type="file"
+                    ref={photoInputRef}
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) =>
+                      handlePhotoUpload(e, (base64) =>
+                        setNodeFormData({ ...nodeFormData, photo: base64 })
+                      )
+                    }
+                  />
+                  <button
+                    type="button"
+                    onClick={() => photoInputRef.current?.click()}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold border border-slate-700"
+                  >
+                    Unggah Foto
+                  </button>
+                  {nodeFormData.photo && (
+                    <button
+                      type="button"
+                      onClick={() => setNodeFormData({ ...nodeFormData, photo: '' })}
+                      className="text-xs text-red-400 hover:underline"
+                    >
+                      Hapus
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Pengaturan Istri (Multi-Istri / Poligini) untuk Laki-laki */}
+              {nodeFormData.gender === 'L' && (
+                <div className="bg-slate-950 p-3 rounded-xl border border-rose-900/40 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="font-semibold text-rose-300 block">
+                      💍 Daftar Istri / Pasangan (Poligini):
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const currentSpouses = nodeFormData.spouses ? [...nodeFormData.spouses] : [];
+                        currentSpouses.push({
+                          id: `sp-${Date.now()}`,
+                          name: '',
+                          order: currentSpouses.length + 1,
+                          note: '',
+                        });
+                        setNodeFormData({ ...nodeFormData, spouses: currentSpouses });
+                      }}
+                      className="px-2 py-0.5 bg-rose-900/60 hover:bg-rose-800 text-rose-200 rounded text-[11px] font-bold"
+                    >
+                      + Tambah Istri
+                    </button>
+                  </div>
+                  {!nodeFormData.spouses || nodeFormData.spouses.length === 0 ? (
+                    <div>
+                      <input
+                        type="text"
+                        value={nodeFormData.spouseName || ''}
+                        onChange={(e) => setNodeFormData({ ...nodeFormData, spouseName: e.target.value })}
+                        placeholder="Nama Istri (Contoh: Hj. Siti Rohimah)"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+                      />
+                      <p className="text-[10px] text-slate-400 mt-1">
+                        Klik "+ Tambah Istri" jika memiliki lebih dari 1 istri (Istri 1, 2, 3, dst.)
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {nodeFormData.spouses.map((sp, idx) => (
+                        <div key={idx} className="bg-slate-900/80 p-2 rounded-lg border border-slate-800 space-y-1">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-bold text-rose-300">Istri Ke-{sp.order || idx + 1}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = nodeFormData.spouses!.filter((_, i) => i !== idx);
+                                setNodeFormData({ ...nodeFormData, spouses: updated });
+                              }}
+                              className="text-red-400 hover:text-red-300 text-[10px]"
+                            >
+                              Hapus
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <input
+                              type="text"
+                              value={sp.name}
+                              onChange={(e) => {
+                                const updated = [...nodeFormData.spouses!];
+                                updated[idx].name = e.target.value;
+                                setNodeFormData({ ...nodeFormData, spouses: updated });
+                              }}
+                              placeholder="Nama Istri"
+                              className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs text-slate-100"
+                            />
+                            <input
+                              type="text"
+                              value={sp.note || ''}
+                              onChange={(e) => {
+                                const updated = [...nodeFormData.spouses!];
+                                updated[idx].note = e.target.value;
+                                setNodeFormData({ ...nodeFormData, spouses: updated });
+                              }}
+                              placeholder="Status/Keterangan"
+                              className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs text-slate-100"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!selectedNodeId && (
+                <div>
+                  <label className="font-semibold text-slate-300 block mb-1">
+                    Orang Tua / Garis Induk:
+                  </label>
+                  <select
+                    value={nodeFormData.parentId || ''}
+                    onChange={(e) =>
+                      setNodeFormData({
+                        ...nodeFormData,
+                        parentId: e.target.value === '' ? null : e.target.value,
+                      })
+                    }
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200"
+                  >
+                    <option value="">-- Entry Awal Bebas (Generasi 1) --</option>
+                    {nodes.map((n) => (
+                      <option key={n.id} value={n.id}>
+                        {n.dotNotation} - {n.honorific} {n.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Jika orang tua yang dipilih memiliki banyak istri, pilih Ibu Kandung */}
+              {(() => {
+                const parentNode = nodes.find((n) => n.id === nodeFormData.parentId);
+                if (parentNode && parentNode.spouses && parentNode.spouses.length > 0) {
+                  return (
+                    <div className="bg-purple-950/40 p-2.5 rounded-xl border border-purple-800/40 space-y-1">
+                      <label className="font-semibold text-purple-300 block text-xs">
+                        🌸 Pilih Ibu Kandung (Istri ke-berapa):
+                      </label>
+                      <select
+                        value={nodeFormData.motherName || ''}
+                        onChange={(e) =>
+                          setNodeFormData({ ...nodeFormData, motherName: e.target.value })
+                        }
+                        className="w-full bg-slate-950 border border-purple-800/50 rounded-xl px-3 py-2 text-slate-200 text-xs"
+                      >
+                        <option value="">-- Pilih Ibu Kandung --</option>
+                        {parentNode.spouses.map((s, idx) => (
+                          <option
+                            key={idx}
+                            value={`Istri Ke-${s.order || idx + 1} (${s.name})`}
+                          >
+                            Istri Ke-{s.order || idx + 1}: {s.name} {s.note ? `[${s.note}]` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[10px] text-purple-400">
+                        Membedakan silsilah saudara seayah beda ibu secara akurat.
+                      </p>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+            </div>
+
+            <div className="flex gap-2 pt-2 border-t border-slate-800">
+              <button
+                onClick={() => setShowAddSingleModal(false)}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-semibold text-xs"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleSaveSingleNode}
+                className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg active:scale-95"
+              >
+                Simpan Data
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------------------------------------------------------- */}
+      {/* MODAL: PETUNJUK PENGGUNAAN */}
+      {/* ----------------------------------------------------------------- */}
+      {showHelpModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl text-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Info className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-bold text-white text-base">Petunjuk Fitur Terbaru</h3>
+              </div>
+              <button
+                onClick={() => setShowHelpModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5 text-xs text-slate-300 leading-relaxed">
+              <div className="p-2.5 bg-slate-950 rounded-xl border border-amber-500/40">
+                <span className="font-bold text-amber-400 block mb-0.5">
+                  1. Solusi Ayah Uyut Ditemukan
+                </span>
+                Tekan tombol emas &ldquo;Ayah Uyut Ditemukan&rdquo; di header atas. Seluruh generasi yang ada otomatis diturunkan 1 tingkat ke bawah secara rapi (*zero collision*), dan Ayah Uyut menempati puncak generasi 1.
+              </div>
+              <div className="p-2.5 bg-slate-950 rounded-xl border border-slate-800">
+                <span className="font-bold text-emerald-400 block mb-0.5">
+                  2. 5 Atribut Presisi
+                </span>
+                Setiap node hanya menampilkan Foto, Nama, Tahun Lahir - Wafat, Alamat Kota/Domisili, dan Gelar Bapak/Ibu.
+              </div>
+              <div className="p-2.5 bg-slate-950 rounded-xl border border-slate-800">
+                <span className="font-bold text-indigo-400 block mb-0.5">
+                  3. Klaim Urutan Silsilah by Akun
+                </span>
+                Klaim posisi Anda di bagan silsilah untuk menandai akun pengguna dan menyorot alur nasab emas langsung dari leluhur puncak.
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowHelpModal(false)}
+              className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs"
+            >
+              Mengerti
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default GridCanvasEngine;

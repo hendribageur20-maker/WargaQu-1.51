@@ -55,12 +55,9 @@ import {
   Phone,
   Move,
   GripVertical,
-  RotateCw,
-  Palette,
-  Grid,
-  Split
+  LayoutGrid
 } from 'lucide-react';
-import { BatchQuickAddModal, formatCleanDisplayTitle } from './BatchQuickAddModal';
+import { GridCanvasEngine } from './GridCanvasEngine';
 
 interface LeluhurQuViewProps {
   onBackToWarga: () => void;
@@ -70,16 +67,18 @@ interface LeluhurQuViewProps {
 export interface FamilySpouse {
   id: string;
   name: string;
+  order?: number; // Istri ke-1, 2, 3, 4
+  note?: string;
   nickname?: string;
   binBinti?: string;
   photo?: string;
-  gender: 'L' | 'P';
+  gender?: 'L' | 'P';
   origin?: string;
   birthYear?: string;
   deathYear?: string;
-  status: 'Hidup' | 'Almarhum';
+  status?: 'Hidup' | 'Almarhum';
   marriageNote?: string;
-  childrenIds: string[];
+  childrenIds?: string[];
 }
 
 export interface FamilyMember {
@@ -92,7 +91,7 @@ export interface FamilyMember {
   kinshipTitle?: string; // Aki, Nini, Uyut, Uwa, Mang, Bibi, dll.
   role: string;
   relation: 'ayah' | 'ibu' | 'anak' | 'kakek' | 'nenek' | 'buyut' | 'paman_bibi' | 'cucu' | 'pasangan' | 'saudara';
-  trah: 'ayah' | 'ibu' | 'inti' | 'pasangan' | 'keduanya';
+  trah: 'ayah' | 'ibu' | 'inti' | 'keduanya';
   gender: 'L' | 'P';
   birthYear: string;
   birthDate?: string;
@@ -104,16 +103,21 @@ export interface FamilyMember {
   notes?: string;
   address?: string;
   spouses?: FamilySpouse[];
+  spouseIds?: string[];
+  spouseOrder?: number;
+  marriageNote?: string;
+  motherId?: string;
+  motherName?: string;
   memberNo?: string; // TA-01, TI-01, TK-01
   canvasX?: number;
   canvasY?: number;
   parentId?: string;
   spouseId?: string;
   siblingId?: string;
-  batchDotId?: string; // a = ID / Kode Batch Dot Notation (disembunyikan dari layar HP)
-  batchParentDotId?: string; // d = ID Orang Tua / Relasi Atas (disembunyikan dari layar HP)
-  batchLevel?: string; // s = Generasi / Level Trah (disembunyikan dari layar HP)
-  spouseRelation?: string; // f = Status Pasangan / Simpul Relasi
+  batchDotId?: string;
+  batchParentDotId?: string;
+  batchLevel?: string | number;
+  spouseRelation?: string;
 }
 
 export interface KartuKeluarga {
@@ -513,6 +517,7 @@ const DEFAULT_POSTS: PostItem[] = [];
 interface QuickAddModalProps {
   target: FamilyMember;
   relationType: 'ayah' | 'ibu' | 'anak' | 'kakak' | 'adik' | 'pasangan';
+  existingMembers?: FamilyMember[];
   onClose: () => void;
   onSubmit: (data: {
     name: string;
@@ -525,6 +530,11 @@ interface QuickAddModalProps {
     address?: string;
     phone?: string;
     photo?: string;
+    // Multi-Istri (Poligini)
+    spouseOrder?: number;
+    marriageNote?: string;
+    motherId?: string;
+    motherName?: string;
   }) => void;
   showNotification: (msg: string) => void;
 }
@@ -532,6 +542,7 @@ interface QuickAddModalProps {
 const QuickAddRelativeModalView: React.FC<QuickAddModalProps> = ({
   target,
   relationType,
+  existingMembers = [],
   onClose,
   onSubmit,
   showNotification
@@ -551,6 +562,27 @@ const QuickAddRelativeModalView: React.FC<QuickAddModalProps> = ({
   const defaultGender: 'L' | 'P' =
     relationType === 'ayah' ? 'L' : relationType === 'ibu' ? 'P' : relationType === 'pasangan' ? (target.gender === 'L' ? 'P' : 'L') : 'L';
 
+  // Hitung jumlah istri yang sudah ada untuk target (Multi-Istri)
+  const existingSpouseList = React.useMemo(() => {
+    const list: Array<{ id: string; name: string; order: number }> = [];
+    if (target.spouses && target.spouses.length > 0) {
+      target.spouses.forEach((s, i) => list.push({ id: s.id, name: s.name, order: i + 1 }));
+    } else if (target.spouseId) {
+      const sp = existingMembers.find(m => m.id === target.spouseId);
+      list.push({ id: target.spouseId, name: sp?.name || 'Istri Pertama', order: 1 });
+    }
+    // Cek juga anggota lain yang spouseId-nya menunjuk ke target
+    existingMembers.forEach(m => {
+      if (m.spouseId === target.id && !list.some(item => item.id === m.id)) {
+        list.push({ id: m.id, name: m.name, order: list.length + 1 });
+      }
+    });
+    return list;
+  }, [target, existingMembers]);
+
+  const nextSpouseOrder = existingSpouseList.length + 1;
+  const isMultiWifeMode = relationType === 'pasangan' && target.gender === 'L' && existingSpouseList.length >= 1;
+
   const [name, setName] = useState('');
   const [nickname, setNickname] = useState('');
   const [binBinti, setBinBinti] = useState(
@@ -566,10 +598,23 @@ const QuickAddRelativeModalView: React.FC<QuickAddModalProps> = ({
   const [phone, setPhone] = useState('');
   const [photo, setPhoto] = useState<string | undefined>(undefined);
 
+  // State Multi-Istri
+  const [spouseOrder, setSpouseOrder] = useState<number>(nextSpouseOrder);
+  const [marriageNote, setMarriageNote] = useState<string>(
+    isMultiWifeMode ? `Istri Ke-${nextSpouseOrder} (Poligini)` : 'Istri Pertama'
+  );
+  const [selectedMotherId, setSelectedMotherId] = useState<string>(
+    existingSpouseList.length > 0 ? existingSpouseList[0].id : ''
+  );
+
   const relationTitles = {
     ayah: { title: 'Tambah Ayah', color: 'bg-blue-600', badge: 'Trah Ayah' },
     ibu: { title: 'Tambah Ibu', color: 'bg-pink-600', badge: 'Trah Ibu' },
-    pasangan: { title: 'Tambah Pasangan (Suami/Istri)', color: 'bg-amber-600', badge: 'Pasangan (Beda Warna)' },
+    pasangan: {
+      title: isMultiWifeMode ? `Tambah Istri ke-${nextSpouseOrder} (Multi-Istri)` : 'Tambah Pasangan (Suami/Istri)',
+      color: 'bg-amber-600',
+      badge: isMultiWifeMode ? 'Poligini / Istri Tambahan' : 'Pasangan'
+    },
     anak: { title: 'Tambah Anak', color: 'bg-emerald-600', badge: 'Penerus Nasab' },
     kakak: { title: 'Tambah Kakak', color: 'bg-teal-600', badge: 'Saudara Kandung' },
     adik: { title: 'Tambah Adik', color: 'bg-sky-600', badge: 'Saudara Kandung' }
@@ -594,6 +639,9 @@ const QuickAddRelativeModalView: React.FC<QuickAddModalProps> = ({
       showNotification('Silakan isi nama lengkap.');
       return;
     }
+
+    const chosenMother = existingSpouseList.find(s => s.id === selectedMotherId);
+
     onSubmit({
       name: name.trim(),
       binBinti: binBinti.trim() || undefined,
@@ -604,7 +652,11 @@ const QuickAddRelativeModalView: React.FC<QuickAddModalProps> = ({
       status,
       address: address.trim() || undefined,
       phone: phone.trim() || undefined,
-      photo
+      photo,
+      spouseOrder: relationType === 'pasangan' ? spouseOrder : undefined,
+      marriageNote: relationType === 'pasangan' ? marriageNote : undefined,
+      motherId: relationType === 'anak' && chosenMother ? chosenMother.id : undefined,
+      motherName: relationType === 'anak' && chosenMother ? `Anak dari Istri ke-${chosenMother.order} (${chosenMother.name})` : undefined
     });
   };
 
@@ -789,6 +841,77 @@ const QuickAddRelativeModalView: React.FC<QuickAddModalProps> = ({
               />
             </div>
           </div>
+
+          {/* SEKSI KHUSUS POLIGINI / MULTI-ISTRI */}
+          {relationType === 'pasangan' && target.gender === 'L' && (
+            <div className="p-2.5 bg-amber-50 rounded-xl border border-amber-300 space-y-2">
+              <div className="flex items-center justify-between text-amber-900 font-bold text-[11px]">
+                <span className="flex items-center gap-1">
+                  <span>💍</span>
+                  <span>Pengaturan Urutan Istri (Poligini)</span>
+                </span>
+                <span className="text-[9px] bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded font-mono">
+                  {existingSpouseList.length} Istri Tercatat
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] text-slate-600 font-bold mb-1">
+                    Urutan Istri:
+                  </label>
+                  <select
+                    value={spouseOrder}
+                    onChange={e => {
+                      const ord = parseInt(e.target.value) || 1;
+                      setSpouseOrder(ord);
+                      setMarriageNote(`Istri Ke-${ord}${ord > 1 ? ' (Poligini)' : ''}`);
+                    }}
+                    className="w-full bg-white border border-amber-300 rounded-lg p-1.5 text-xs text-slate-900 font-bold"
+                  >
+                    <option value={1}>Istri Ke-1</option>
+                    <option value={2}>Istri Ke-2 (Poligini)</option>
+                    <option value={3}>Istri Ke-3 (Poligini)</option>
+                    <option value={4}>Istri Ke-4 (Poligini)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-600 font-bold mb-1">
+                    Label / Catatan:
+                  </label>
+                  <input
+                    type="text"
+                    value={marriageNote}
+                    onChange={e => setMarriageNote(e.target.value)}
+                    placeholder="Contoh: Istri Kedua (Nikah 1990)"
+                    className="w-full bg-white border border-amber-300 rounded-lg p-1.5 text-xs text-slate-900"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SEKSI PILIH IBU KANDUNG SAAT TAMBAH ANAK DARI AYAH MULTI-ISTRI */}
+          {relationType === 'anak' && target.gender === 'L' && existingSpouseList.length > 0 && (
+            <div className="p-2.5 bg-rose-50 rounded-xl border border-rose-300 space-y-1.5">
+              <label className="block text-[11px] text-rose-900 font-bold">
+                🌸 Pilih Ibu Kandung (Istri ke-berapa):
+              </label>
+              <select
+                value={selectedMotherId}
+                onChange={e => setSelectedMotherId(e.target.value)}
+                className="w-full bg-white border border-rose-300 rounded-lg p-2 text-xs text-slate-900 font-bold"
+              >
+                {existingSpouseList.map(s => (
+                  <option key={s.id} value={s.id}>
+                    Istri ke-{s.order}: {s.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[10px] text-rose-700">
+                Garis keturunan anak akan ditautkan secara akurat ke ibu kandung ini.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Buttons */}
@@ -829,7 +952,6 @@ const EditMemberModalView: React.FC<EditMemberModalProps> = ({
   const [name, setName] = useState(member.name);
   const [nickname, setNickname] = useState(member.nickname || '');
   const [binBinti, setBinBinti] = useState(member.binBinti || '');
-  const [memberNo, setMemberNo] = useState(member.memberNo || '');
   const [kinshipTitle, setKinshipTitle] = useState(member.kinshipTitle || member.role || '');
   const [role, setRole] = useState(member.role || '');
   const [trah, setTrah] = useState<FamilyMember['trah']>(member.trah);
@@ -841,6 +963,15 @@ const EditMemberModalView: React.FC<EditMemberModalProps> = ({
   const [phone, setPhone] = useState(member.phone || '');
   const [notes, setNotes] = useState(member.notes || '');
   const [photo, setPhoto] = useState<string | undefined>(member.photo);
+
+  // State Multi-Istri (Poligini)
+  const [spouses, setSpouses] = useState<FamilySpouse[]>(member.spouses || []);
+  const [showAddSpouseForm, setShowAddSpouseForm] = useState(false);
+  const [newSpouseName, setNewSpouseName] = useState('');
+  const [newSpouseBin, setNewSpouseBin] = useState('');
+  const [newSpouseNote, setNewSpouseNote] = useState('');
+  const [newSpouseStatus, setNewSpouseStatus] = useState<'Hidup' | 'Almarhum'>('Hidup');
+  const [newSpouseBirthYear, setNewSpouseBirthYear] = useState('1990');
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -866,7 +997,6 @@ const EditMemberModalView: React.FC<EditMemberModalProps> = ({
       name: name.trim(),
       nickname: nickname.trim() || undefined,
       binBinti: binBinti.trim() || undefined,
-      memberNo: memberNo.trim() || undefined,
       kinshipTitle: kinshipTitle.trim() || undefined,
       role: role.trim() || kinshipTitle.trim(),
       trah,
@@ -877,7 +1007,8 @@ const EditMemberModalView: React.FC<EditMemberModalProps> = ({
       address: address.trim() || undefined,
       phone: phone.trim() || undefined,
       notes: notes.trim() || undefined,
-      photo
+      photo,
+      spouses
     });
   };
 
@@ -968,17 +1099,7 @@ const EditMemberModalView: React.FC<EditMemberModalProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1">No. Silsilah (1 / 2.1)</label>
-              <input
-                type="text"
-                value={memberNo}
-                onChange={e => setMemberNo(e.target.value)}
-                placeholder="misal: 2.1 / TK-01"
-                className="w-full bg-[#f0fdf4] border border-emerald-200 rounded-xl p-2 text-slate-900 font-mono font-bold focus:outline-none focus:border-emerald-600"
-              />
-            </div>
+          <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1">Jalur Trah</label>
               <select
@@ -986,19 +1107,18 @@ const EditMemberModalView: React.FC<EditMemberModalProps> = ({
                 onChange={e => setTrah(e.target.value as any)}
                 className="w-full bg-[#f0fdf4] border border-emerald-200 rounded-xl p-2 text-slate-900 font-bold focus:outline-none focus:border-emerald-600"
               >
-                <option value="ayah">Trah Ayah</option>
-                <option value="ibu">Trah Ibu</option>
+                <option value="ayah">Trah Ayah (Kuningan)</option>
+                <option value="ibu">Trah Ibu (Bogor)</option>
                 <option value="inti">Keluarga Inti</option>
-                <option value="pasangan">Trah Pasangan</option>
               </select>
             </div>
             <div>
-              <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1">Kekerabatan / Gelar</label>
+              <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1">Panggilan / Kekerabatan</label>
               <input
                 type="text"
                 value={kinshipTitle}
                 onChange={e => setKinshipTitle(e.target.value)}
-                placeholder="Uyut / Kakek / Anak..."
+                placeholder="Aki / Nini / Ayah / Ibu..."
                 className="w-full bg-[#f0fdf4] border border-emerald-200 rounded-xl p-2 text-slate-900 font-bold focus:outline-none focus:border-emerald-600"
               />
             </div>
@@ -1081,6 +1201,137 @@ const EditMemberModalView: React.FC<EditMemberModalProps> = ({
               className="w-full bg-[#f0fdf4] border border-emerald-200 rounded-xl p-2 text-slate-900 focus:outline-none"
             />
           </div>
+
+          {/* SEKSI SOLUSI MULTI-ISTRI (POLIGINI) */}
+          {gender === 'L' && (
+            <div className="p-3 bg-amber-50/70 border border-amber-300 rounded-xl space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-amber-900 text-[11px] flex items-center gap-1.5">
+                  <span>💍</span>
+                  <span>Daftar Istri / Pasangan ({spouses.length})</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowAddSpouseForm(!showAddSpouseForm)}
+                  className="text-[10px] font-bold bg-amber-600 hover:bg-amber-700 text-white px-2 py-1 rounded-lg flex items-center gap-1 shadow-2xs transition"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>+ Tambah Istri (Poligini)</span>
+                </button>
+              </div>
+
+              {spouses.length === 0 ? (
+                <p className="text-[10px] text-slate-500 italic">Belum ada data istri tercatat.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-36 overflow-y-auto no-scrollbar">
+                  {spouses.map((sp, idx) => (
+                    <div key={sp.id || idx} className="p-2 bg-white rounded-lg border border-amber-200 flex items-center justify-between text-[11px]">
+                      <div>
+                        <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                          <span className="bg-amber-100 text-amber-800 text-[9px] font-mono px-1.5 py-0.2 rounded font-extrabold">
+                            Istri ke-{idx + 1}
+                          </span>
+                          <span>{sp.name}</span>
+                          {sp.status === 'Almarhum' && (
+                            <span className="text-[8px] bg-slate-100 text-slate-500 px-1 rounded">Alm</span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-500">
+                          {sp.marriageNote || `Pernikahan ke-${idx + 1}`}
+                          {sp.childrenIds && sp.childrenIds.length > 0 && ` • ${sp.childrenIds.length} Anak`}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSpouses(prev => prev.filter((_, i) => i !== idx))}
+                        className="text-slate-400 hover:text-rose-600 p-1 rounded hover:bg-rose-50"
+                        title="Hapus Istri"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Form Tambah Istri Baru */}
+              {showAddSpouseForm && (
+                <div className="p-2.5 bg-white rounded-xl border border-amber-300 space-y-2 mt-2 animate-in fade-in">
+                  <span className="font-bold text-amber-900 text-[10px] block">
+                    Form Tambah Istri ke-{spouses.length + 1}
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Nama Lengkap Istri *"
+                    value={newSpouseName}
+                    onChange={e => setNewSpouseName(e.target.value)}
+                    className="w-full bg-[#f0fdf4] border border-emerald-200 rounded-lg p-1.5 text-xs text-slate-900 font-bold"
+                  />
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <input
+                      type="text"
+                      placeholder="Bin / Binti (Nama Ayah)"
+                      value={newSpouseBin}
+                      onChange={e => setNewSpouseBin(e.target.value)}
+                      className="w-full bg-[#f0fdf4] border border-emerald-200 rounded-lg p-1.5 text-[11px]"
+                    />
+                    <select
+                      value={newSpouseStatus}
+                      onChange={e => setNewSpouseStatus(e.target.value as any)}
+                      className="w-full bg-[#f0fdf4] border border-emerald-200 rounded-lg p-1.5 text-[11px] font-bold"
+                    >
+                      <option value="Hidup">Hidup</option>
+                      <option value="Almarhum">Almarhum</option>
+                    </select>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Catatan Pernikahan (e.g. Istri Kedua, Nikah 1995 di Kuningan)"
+                    value={newSpouseNote}
+                    onChange={e => setNewSpouseNote(e.target.value)}
+                    className="w-full bg-[#f0fdf4] border border-emerald-200 rounded-lg p-1.5 text-[11px]"
+                  />
+                  <div className="flex gap-1.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!newSpouseName.trim()) {
+                          showNotification('Nama istri wajib diisi');
+                          return;
+                        }
+                        const newSp: FamilySpouse = {
+                          id: `sp_${Date.now()}`,
+                          name: newSpouseName.trim(),
+                          binBinti: newSpouseBin.trim() || undefined,
+                          gender: 'P',
+                          birthYear: newSpouseBirthYear,
+                          status: newSpouseStatus,
+                          marriageNote: newSpouseNote.trim() || `Istri Ke-${spouses.length + 1}`,
+                          childrenIds: []
+                        };
+                        setSpouses(prev => [...prev, newSp]);
+                        setNewSpouseName('');
+                        setNewSpouseBin('');
+                        setNewSpouseNote('');
+                        setShowAddSpouseForm(false);
+                        showNotification(`Istri ke-${spouses.length + 1} (${newSp.name}) berhasil ditambahkan!`);
+                      }}
+                      className="flex-1 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] py-1.5 rounded-lg"
+                    >
+                      Simpan Istri
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddSpouseForm(false)}
+                      className="px-2.5 bg-slate-100 text-slate-600 text-[10px] font-semibold rounded-lg"
+                    >
+                      Batal
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex gap-2 pt-2 border-t border-slate-100">
@@ -1111,7 +1362,7 @@ interface UpscaleExportModalProps {
   onClose: () => void;
   onDownloadSvg: (s: 'A4' | 'A3' | 'A2' | 'A1' | 'A0') => void;
   onDownloadPng: (s: 'A4' | 'A3' | 'A2' | 'A1' | 'A0') => void;
-  trahFilter: 'all' | 'ayah' | 'ibu' | 'inti' | 'pasangan' | 'gabung4';
+  trahFilter: 'all' | 'ayah' | 'ibu';
   membersCount: number;
   showNotification: (msg: string) => void;
 }
@@ -1265,8 +1516,8 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
   onBackToWarga,
   showNotification
 }) => {
-  // Navigation Tabs: Silsilah | Medsos | Doa Malam Jumat | Arsip & Ekspor
-  const [activeTab, setActiveTab] = useState<'silsilah' | 'medsos' | 'doa' | 'arsip'>('silsilah');
+  // Navigation Tabs: Silsilah | Grid Canvas | Medsos | Doa Malam Jumat | Arsip & Ekspor
+  const [activeTab, setActiveTab] = useState<'silsilah' | 'gridcanvas' | 'medsos' | 'doa' | 'arsip'>('silsilah');
   const [activeMedsosTrah, setActiveMedsosTrah] = useState<'ayah' | 'ibu'>('ayah');
 
   // Silsilah Data (Offline-first LocalStorage - BERSIH DARI MOCK DATA)
@@ -1330,33 +1581,14 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
     }
   });
 
-  // Tree View Filter & Interactive Controls (Semua, Trah Ayah, Trah Ibu, Inti, Pasangan, 4 Trah Matrix)
-  const [treeFilter, setTreeFilter] = useState<'all' | 'ayah' | 'ibu' | 'inti' | 'pasangan' | 'gabung4'>('all');
+  // Tree View Filter & Interactive Controls (Fokus: Semua, Trah Ayah, Trah Ibu)
+  const [treeFilter, setTreeFilter] = useState<'all' | 'ayah' | 'ibu'>('all');
   const [treeZoom, setTreeZoom] = useState<number>(1);
   const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [canvasLayoutMode, setCanvasLayoutMode] = useState<'modular' | 'grid'>('modular');
   const [isCanvasFullscreen, setIsCanvasFullscreen] = useState(false);
   const [relationChooserMember, setRelationChooserMember] = useState<FamilyMember | null>(null);
-
-  // Fitur Baru: Batch Isi Cepat (Uyut -> Anak 1..5 -> Cucu 2.1..2.3)
-  const [showBatchAddModal, setShowBatchAddModal] = useState(false);
-
-  // Fitur Baru: Opsi Kertas Kanvas (A0 - A4) & Orientasi
-  const [paperCanvasSize, setPaperCanvasSize] = useState<'A0' | 'A1' | 'A2' | 'A3' | 'A4'>('A2');
-  const [paperOrientation, setPaperOrientation] = useState<'landscape' | 'portrait'>('landscape');
-
-  // Fitur Baru: Opsi Warna Frame (Emas, Zamrud, Safir, Ruby, Kayu Jati, Dark Onyx, Perak)
-  const [frameColor, setFrameColor] = useState<'gold' | 'emerald' | 'sapphire' | 'ruby' | 'wood' | 'dark' | 'silver'>('gold');
-
-  // Fitur Baru: Opsi Skala Foto & Ukuran Kartu (A7 Ringkas, A6 Standar, A5 Besar, A4 Poster)
-  const [cardScale, setCardScale] = useState<'A7' | 'A6' | 'A5' | 'A4'>('A6');
-
-  // Fitur Baru: Pola Tata Posisi (Seri 1..5, Paralel 2.1..2.3, 3 Sayap, 4 Trah Matrix X,Y)
-  const [layoutMode, setLayoutMode] = useState<'seri' | 'paralel' | 'three_wings' | 'matrix_4trah'>('three_wings');
-
-  // Fitur Baru: Putar / Rotasi Kanvas (0, 90, 180, 270)
-  const [canvasRotation, setCanvasRotation] = useState<0 | 90 | 180 | 270>(0);
 
   // Touch Pinch-to-zoom (2 Jari) References
   const touchStartDistRef = useRef<number | null>(null);
@@ -1479,32 +1711,17 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
     }
   }, [kkData]);
 
-  // Format status & rentang tahun privacy-first (Format: 'Ada (Lahir 1985)' atau 'Wafat (1950 - 2018)')
+  // Format rentang tahun privacy-first (Format: 'Lahir 1985' atau '1950 - 2018')
   const getYearRangeDisplay = (m: FamilyMember) => {
     if (m.status === 'Almarhum') {
-      return m.deathYear ? `${m.birthYear || '?'} - ${m.deathYear}` : `Wafat (${m.birthYear || 'Tercatat'})`;
+      return `${m.birthYear || '?'} - ${m.deathYear || 'Wafat'}`;
     }
-    return `Ada (Lahir ${m.birthYear || 'Tercatat'})`;
-  };
-
-  // Helper Tampilan Bersih Layar HP: Hanya [Sapaan (c)] + [Nama (b)] tanpa pengulangan kata
-  const getCleanDisplayName = (m: FamilyMember): string => {
-    return formatCleanDisplayTitle(m.kinshipTitle || '', m.name || '');
+    return `Lahir ${m.birthYear || 'Tercatat'}`;
   };
 
   // Nomor Anggota Auto (e.g. TA-01 untuk Trah Ayah, TI-01 untuk Trah Ibu, TK-01 untuk Inti)
-  // Aturan Pemrosesan UI: Sembunyikan semua parameter internal (a, d, s) dari penomoran
   const getMemberNo = (member: FamilyMember, allMembers: FamilyMember[] = members): string => {
-    if (member.batchDotId) {
-      const sameTrahMembers = allMembers.filter(m => m.trah === member.trah);
-      const idx = sameTrahMembers.findIndex(m => m.id === member.id);
-      const prefix = member.trah === 'ayah' ? 'TA' : member.trah === 'ibu' ? 'TI' : 'TK';
-      const num = (idx >= 0 ? idx + 1 : 1).toString().padStart(2, '0');
-      return `${prefix}-${num}`;
-    }
-    if (member.memberNo && !member.memberNo.includes('.') && !member.memberNo.startsWith('L')) {
-      return member.memberNo;
-    }
+    if (member.memberNo) return member.memberNo;
     const prefix = member.trah === 'ayah' ? 'TA' : member.trah === 'ibu' ? 'TI' : 'TK';
     const sameTrahMembers = allMembers.filter(m => m.trah === member.trah);
     const idx = sameTrahMembers.findIndex(m => m.id === member.id);
@@ -1512,32 +1729,11 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
     return `${prefix}-${num}`;
   };
 
-  // Standarisasi Ukuran Kartu Modular Berdasarkan Preset cardScale (A7 - A4)
-  const SCALE_CONFIG = {
-    A7: { width: 210, height: 145, gapX: 32, gapY: 50, photoSize: 40, nameClass: 'text-[11px]', descClass: 'text-[9px]', badgeClass: 'text-[8px]' },
-    A6: { width: 270, height: 185, gapX: 45, gapY: 65, photoSize: 52, nameClass: 'text-xs', descClass: 'text-[10px]', badgeClass: 'text-[9px]' },
-    A5: { width: 330, height: 225, gapX: 55, gapY: 75, photoSize: 66, nameClass: 'text-sm', descClass: 'text-xs', badgeClass: 'text-[10px]' },
-    A4: { width: 400, height: 270, gapX: 70, gapY: 90, photoSize: 82, nameClass: 'text-base', descClass: 'text-sm', badgeClass: 'text-xs' },
-  };
-
-  const currentScale = SCALE_CONFIG[cardScale] || SCALE_CONFIG.A6;
-  const CANVAS_CARD_WIDTH = currentScale.width;
-  const CANVAS_CARD_HEIGHT = currentScale.height;
-  const CANVAS_GAP_X = currentScale.gapX;
-  const CANVAS_GAP_Y = currentScale.gapY;
-
-  // Standarisasi Dimensi Kanvas Kertas Berdasarkan paperCanvasSize (A0 - A4) & Orientasi
-  const PAPER_BOUNDS_MAP = {
-    A0: { w: 4200, h: 2970, mm: '1189 x 841 mm', label: 'A0 (Poster Akbar / Spanduk)' },
-    A1: { w: 3200, h: 2260, mm: '841 x 594 mm', label: 'A1 (Poster Besar)' },
-    A2: { w: 2400, h: 1700, mm: '594 x 420 mm', label: 'A2 (Bagan Sedang)' },
-    A3: { w: 1800, h: 1270, mm: '420 x 297 mm', label: 'A3 (Meja / Buku)' },
-    A4: { w: 1400, h: 990, mm: '297 x 210 mm', label: 'A4 (Standar Cetak HVS)' },
-  };
-
-  const currentPaper = PAPER_BOUNDS_MAP[paperCanvasSize] || PAPER_BOUNDS_MAP.A2;
-  const canvasWidth = paperOrientation === 'landscape' ? currentPaper.w : currentPaper.h;
-  const canvasHeight = paperOrientation === 'landscape' ? currentPaper.h : currentPaper.w;
+  // Standarisasi Ukuran Kartu Modular & Spasi Canvas
+  const CANVAS_CARD_WIDTH = 270;
+  const CANVAS_CARD_HEIGHT = 185;
+  const CANVAS_GAP_X = 45;
+  const CANVAS_GAP_Y = 65;
 
   // Canvas Pan & Auto-Fit Navigation State
   const canvasContainerRef = useRef<HTMLDivElement>(null);
@@ -1585,6 +1781,7 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
         testY += CANVAS_CARD_HEIGHT + CANVAS_GAP_Y;
       }
     }
+
     return { x: testX, y: testY };
   };
 
@@ -1713,297 +1910,18 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
     return membersList.map(m => result.get(m.id) || m);
   };
 
-  // ==================== TATA SILSILAH SERI (MENDATAR 1, 2, 3, 4, 5...) ====================
-  const layoutSeri = (membersList: FamilyMember[]): FamilyMember[] => {
-    if (membersList.length === 0) return [];
-    const result = new Map<string, FamilyMember>();
-
-    // 1. Tokoh Utama / Generasi Paling Atas (Root)
-    const roots = membersList.filter(m => !m.parentId || m.relation === 'buyut' || m.relation === 'kakek' || m.relation === 'nenek');
-    const rootList = roots.length > 0 ? roots : [membersList[0]];
-    const startY = 120;
-    const centerX = 1600;
-
-    const totalRootWidth = rootList.length * CANVAS_CARD_WIDTH + Math.max(0, rootList.length - 1) * CANVAS_GAP_X;
-    const rootStartX = Math.max(80, centerX - Math.round(totalRootWidth / 2));
-
-    rootList.forEach((r, idx) => {
-      result.set(r.id, {
-        ...r,
-        canvasX: rootStartX + idx * (CANVAS_CARD_WIDTH + CANVAS_GAP_X),
-        canvasY: startY,
-        memberNo: r.memberNo || (idx + 1).toString()
-      });
-    });
-
-    // 2. Anak-anak Generasi 1 (Seri Horizontal sejajar dari kiri ke kanan 1, 2, 3, 4, 5...)
-    const rootIds = new Set(rootList.map(r => r.id));
-    const directChildren = membersList.filter(m => !rootIds.has(m.id) && (!m.parentId || rootIds.has(m.parentId)));
-    const sortedChildren = directChildren.sort((a, b) => {
-      const numA = parseFloat(a.memberNo || '99') || 99;
-      const numB = parseFloat(b.memberNo || '99') || 99;
-      return numA - numB;
-    });
-
-    const childY = startY + CANVAS_CARD_HEIGHT + CANVAS_GAP_Y + 40;
-    const totalChildW = sortedChildren.length * CANVAS_CARD_WIDTH + Math.max(0, sortedChildren.length - 1) * CANVAS_GAP_X;
-    const childStartX = Math.max(80, centerX - Math.round(totalChildW / 2));
-
-    sortedChildren.forEach((c, idx) => {
-      result.set(c.id, {
-        ...c,
-        canvasX: childStartX + idx * (CANVAS_CARD_WIDTH + CANVAS_GAP_X),
-        canvasY: childY,
-        memberNo: c.memberNo || `${idx + 1}`
-      });
-    });
-
-    // 3. Sub-anak / Cucu (2.1, 2.2, 2.3...) mendatar berurutan di bawah
-    const placedIds = new Set([...rootList.map(r => r.id), ...sortedChildren.map(c => c.id)]);
-    const grandchildren = membersList.filter(m => !placedIds.has(m.id));
-
-    const grandY = childY + CANVAS_CARD_HEIGHT + CANVAS_GAP_Y + 40;
-    const totalGrandW = grandchildren.length * CANVAS_CARD_WIDTH + Math.max(0, grandchildren.length - 1) * CANVAS_GAP_X;
-    const grandStartX = Math.max(80, centerX - Math.round(totalGrandW / 2));
-
-    grandchildren.forEach((g, idx) => {
-      result.set(g.id, {
-        ...g,
-        canvasX: grandStartX + idx * (CANVAS_CARD_WIDTH + CANVAS_GAP_X),
-        canvasY: grandY,
-        memberNo: g.memberNo || `Cucu-${idx + 1}`
-      });
-    });
-
-    return membersList.map(m => result.get(m.id) || m);
-  };
-
-  // ==================== TATA SILSILAH PARALEL (CABANG KOLOM 2.1, 2.2, 2.3...) ====================
-  const layoutParalel = (membersList: FamilyMember[]): FamilyMember[] => {
-    if (membersList.length === 0) return [];
-    const result = new Map<string, FamilyMember>();
-
-    const roots = membersList.filter(m => !m.parentId || m.relation === 'buyut' || m.relation === 'kakek' || m.relation === 'nenek');
-    const rootList = roots.length > 0 ? roots : [membersList[0]];
-    const startY = 100;
-    const centerX = 1600;
-
-    const totalRootWidth = rootList.length * CANVAS_CARD_WIDTH + Math.max(0, rootList.length - 1) * CANVAS_GAP_X;
-    const rootStartX = Math.max(80, centerX - Math.round(totalRootWidth / 2));
-
-    rootList.forEach((r, idx) => {
-      result.set(r.id, {
-        ...r,
-        canvasX: rootStartX + idx * (CANVAS_CARD_WIDTH + CANVAS_GAP_X),
-        canvasY: startY,
-        memberNo: r.memberNo || (idx + 1).toString()
-      });
-    });
-
-    const rootIds = new Set(rootList.map(r => r.id));
-    const directChildren = membersList.filter(m => !rootIds.has(m.id) && (!m.parentId || rootIds.has(m.parentId)));
-    const sortedChildren = directChildren.sort((a, b) => {
-      const numA = parseFloat(a.memberNo || '99') || 99;
-      const numB = parseFloat(b.memberNo || '99') || 99;
-      return numA - numB;
-    });
-
-    const childY = startY + CANVAS_CARD_HEIGHT + CANVAS_GAP_Y + 40;
-    const colSpacing = CANVAS_CARD_WIDTH + CANVAS_GAP_X + 25;
-    const totalColsW = sortedChildren.length * colSpacing;
-    const colStartX = Math.max(80, centerX - Math.round(totalColsW / 2));
-
-    sortedChildren.forEach((child, colIdx) => {
-      const colX = colStartX + colIdx * colSpacing;
-      // Posisi Kepala Kolom Anak
-      result.set(child.id, {
-        ...child,
-        canvasX: colX,
-        canvasY: childY,
-        memberNo: child.memberNo || `${colIdx + 1}`
-      });
-
-      // Cari cucu/sub-anak dari anak ini
-      const subs = membersList.filter(m => m.parentId === child.id || (m.memberNo && m.memberNo.startsWith(`${child.memberNo || (colIdx + 1)}.`)));
-      subs.forEach((sub, subIdx) => {
-        result.set(sub.id, {
-          ...sub,
-          canvasX: colX,
-          canvasY: childY + (subIdx + 1) * (CANVAS_CARD_HEIGHT + CANVAS_GAP_Y),
-          memberNo: sub.memberNo || `${child.memberNo || (colIdx + 1)}.${subIdx + 1}`
-        });
-      });
-    });
-
-    // Anggota yang belum ditempatkan
-    const remaining = membersList.filter(m => !result.has(m.id));
-    remaining.forEach((rem, idx) => {
-      result.set(rem.id, {
-        ...rem,
-        canvasX: 80 + idx * (CANVAS_CARD_WIDTH + CANVAS_GAP_X),
-        canvasY: 2200,
-        memberNo: rem.memberNo || `X-${idx + 1}`
-      });
-    });
-
-    return membersList.map(m => result.get(m.id) || m);
-  };
-
-  // ==================== TATA SILSILAH MATRIX 4 TRAH (X, Y MATRIX) ====================
-  const layoutMatrix4Trah = (membersList: FamilyMember[]): FamilyMember[] => {
-    if (membersList.length === 0) return [];
-    const result = new Map<string, FamilyMember>();
-
-    const centerX = 1800;
-    const centerY = 1300;
-
-    // 1. Pusat (Center Origin): User, Pasangan & Anak-anak
-    const intiMembers = membersList.filter(m => m.trah === 'inti');
-    const userMember = intiMembers.find(m => m.relation === 'ayah' || m.id === '1') || intiMembers[0] || membersList[0];
-    const spouseMember = intiMembers.find(m => m.id !== userMember?.id && (m.relation === 'ibu' || m.relation === 'pasangan' || m.spouseId === userMember?.id));
-    const childrenMembers = intiMembers.filter(m => m.id !== userMember?.id && m.id !== spouseMember?.id);
-
-    if (userMember) {
-      result.set(userMember.id, {
-        ...userMember,
-        canvasX: centerX - CANVAS_CARD_WIDTH - Math.round(CANVAS_GAP_X / 2),
-        canvasY: centerY - Math.round(CANVAS_CARD_HEIGHT / 2),
-        memberNo: userMember.memberNo || '01'
-      });
-    }
-
-    if (spouseMember) {
-      result.set(spouseMember.id, {
-        ...spouseMember,
-        canvasX: centerX + Math.round(CANVAS_GAP_X / 2),
-        canvasY: centerY - Math.round(CANVAS_CARD_HEIGHT / 2),
-        memberNo: spouseMember.memberNo || '02'
-      });
-    }
-
-    // Anak-anak di bawah titik temu User & Pasangan
-    childrenMembers.forEach((ch, idx) => {
-      const totalW = childrenMembers.length * CANVAS_CARD_WIDTH + Math.max(0, childrenMembers.length - 1) * CANVAS_GAP_X;
-      const startX = centerX - Math.round(totalW / 2);
-      result.set(ch.id, {
-        ...ch,
-        canvasX: startX + idx * (CANVAS_CARD_WIDTH + CANVAS_GAP_X),
-        canvasY: centerY + Math.round(CANVAS_CARD_HEIGHT / 2) + CANVAS_GAP_Y,
-        memberNo: ch.memberNo || `A-${idx + 1}`
-      });
-    });
-
-    // 2. Kuadran I (Barat Laut / Kiri Atas): Trah Ayah User
-    const ayahMembers = membersList.filter(m => m.trah === 'ayah' && m.id !== userMember?.id);
-    ayahMembers.forEach((m, idx) => {
-      const row = Math.floor(idx / 3);
-      const col = idx % 3;
-      result.set(m.id, {
-        ...m,
-        canvasX: Math.max(60, centerX - 350 - (col + 1) * (CANVAS_CARD_WIDTH + CANVAS_GAP_X)),
-        canvasY: Math.max(60, centerY - 250 - (row + 1) * (CANVAS_CARD_HEIGHT + CANVAS_GAP_Y)),
-        memberNo: m.memberNo || `TA-${idx + 1}`
-      });
-    });
-
-    // 3. Kuadran II (Timur Laut / Kanan Atas): Trah Ibu User
-    const ibuMembers = membersList.filter(m => m.trah === 'ibu' && m.id !== userMember?.id);
-    ibuMembers.forEach((m, idx) => {
-      const row = Math.floor(idx / 3);
-      const col = idx % 3;
-      result.set(m.id, {
-        ...m,
-        canvasX: centerX + 350 + col * (CANVAS_CARD_WIDTH + CANVAS_GAP_X),
-        canvasY: Math.max(60, centerY - 250 - (row + 1) * (CANVAS_CARD_HEIGHT + CANVAS_GAP_Y)),
-        memberNo: m.memberNo || `TI-${idx + 1}`
-      });
-    });
-
-    // 4. Kuadran III (Barat Daya / Kiri Bawah): Trah Ayah Pasangan
-    const pasanganMembers = membersList.filter(m => (m.trah === 'pasangan' || m.relation === 'pasangan') && m.id !== spouseMember?.id);
-    const pasanganAyah = pasanganMembers.filter(m => m.gender === 'L' || m.role?.toLowerCase().includes('ayah') || m.kinshipTitle?.toLowerCase().includes('ayah'));
-    const pasanganIbu = pasanganMembers.filter(m => !pasanganAyah.includes(m));
-
-    pasanganAyah.forEach((m, idx) => {
-      const row = Math.floor(idx / 3);
-      const col = idx % 3;
-      result.set(m.id, {
-        ...m,
-        canvasX: Math.max(60, centerX - 350 - (col + 1) * (CANVAS_CARD_WIDTH + CANVAS_GAP_X)),
-        canvasY: centerY + 250 + row * (CANVAS_CARD_HEIGHT + CANVAS_GAP_Y),
-        memberNo: m.memberNo || `TPA-${idx + 1}`
-      });
-    });
-
-    // 5. Kuadran IV (Timur Daya / Kanan Bawah): Trah Ibu Pasangan
-    pasanganIbu.forEach((m, idx) => {
-      const row = Math.floor(idx / 3);
-      const col = idx % 3;
-      result.set(m.id, {
-        ...m,
-        canvasX: centerX + 350 + col * (CANVAS_CARD_WIDTH + CANVAS_GAP_X),
-        canvasY: centerY + 250 + row * (CANVAS_CARD_HEIGHT + CANVAS_GAP_Y),
-        memberNo: m.memberNo || `TPI-${idx + 1}`
-      });
-    });
-
-    return membersList.map(m => result.get(m.id) || m);
-  };
-
-  // Dispatcher Penerapan Layout
-  const handleApplyLayout = (mode: 'seri' | 'paralel' | 'three_wings' | 'matrix_4trah') => {
+  const handleApplyThreeWingsLayout = () => {
     if (members.length === 0) return;
-    setLayoutMode(mode);
-    let reordered: FamilyMember[] = [];
-    if (mode === 'seri') {
-      reordered = layoutSeri(members);
-      showNotification('Tata Seri (Anak 1, 2, 3, 4, 5 Berurutan Mendatar) berhasil diterapkan!');
-    } else if (mode === 'paralel') {
-      reordered = layoutParalel(members);
-      showNotification('Tata Paralel (Cabang Sub-Anak 2.1, 2.2 Berkolom) berhasil diterapkan!');
-    } else if (mode === 'three_wings') {
-      reordered = layoutTrahThreeWings(members);
-      showNotification('Tata 3 Sayap (Ayah Kiri • Ibu Kanan • Inti Bawah) berhasil diterapkan!');
-    } else if (mode === 'matrix_4trah') {
-      reordered = layoutMatrix4Trah(members);
-      showNotification('Tata Matrix 4 Trah (Ayah, Ibu, Mertua Ayah, Mertua Ibu) berhasil diterapkan!');
-    }
+    const reordered = layoutTrahThreeWings(members);
     setMembers(reordered);
     setTimeout(() => {
       handleAutoFitAll();
-    }, 80);
-  };
-
-  // Putar / Rotasi Kanvas (0, 90, 180, 270) & Orientasi Kertas
-  const handleRotateCanvas = () => {
-    setCanvasRotation(r => ((r + 90) % 360) as 0 | 90 | 180 | 270);
-    setPaperOrientation(o => (o === 'landscape' ? 'portrait' : 'landscape'));
-    showNotification('Orientasi kanvas dan kertas cetak berhasil diputar 90°!');
-  };
-
-  // Simpan Batch Anggota Baru dari BatchQuickAddModal
-  const handleBatchSaveMembers = (newMembers: FamilyMember[]) => {
-    setMembers(prev => {
-      const existingIds = new Set(prev.map(m => m.id));
-      const filtered = newMembers.filter(m => !existingIds.has(m.id));
-      const updated = [...prev, ...filtered];
-      try {
-        localStorage.setItem('wargaqu_leluhur_members_v4', JSON.stringify(updated));
-      } catch {}
-      return updated;
-    });
-
-    setTimeout(() => {
-      handleAutoFitAll();
-    }, 120);
-  };
-
-  const handleApplyThreeWingsLayout = () => {
-    handleApplyLayout('three_wings');
+    }, 60);
+    showNotification('Silsilah 3 Sayap (Ayah Kiri • Ibu Kanan • Inti Bawah) berhasil ditata rapi!');
   };
 
   const handleApplyAutoLayout = () => {
-    handleApplyLayout(layoutMode);
+    handleApplyThreeWingsLayout();
   };
 
   // Simpan Tata Letak Kanvas Secara Permanen
@@ -2181,27 +2099,15 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
     showNotification(`Tampilan disesuaikan mencakup semua (${Math.round(fitZoom * 100)}% • ${displayedMembers.length} anggota)!`);
   };
 
-  // Warna & Styling Card Berdasarkan Trah, Frame Color & Status Pasangan
+  // Warna & Styling Card Berdasarkan Trah & Status Pasangan
   const getCardStyle = (m: FamilyMember, isSelected: boolean) => {
     const isSpouse = m.relation === 'pasangan' || (m.trah === 'inti' && (m.role?.toLowerCase().includes('istri') || m.kinshipTitle?.toLowerCase().includes('istri')));
-
-    const FRAME_PALETTES: Record<string, { ring: string; border: string; bg: string }> = {
-      gold: { ring: 'ring-amber-300', border: 'border-amber-400', bg: 'bg-gradient-to-br from-[#fffdfa] to-[#fffbeb]' },
-      emerald: { ring: 'ring-emerald-300', border: 'border-emerald-500', bg: 'bg-gradient-to-br from-[#f0fdf4] to-[#ecfdf5]' },
-      sapphire: { ring: 'ring-blue-300', border: 'border-blue-500', bg: 'bg-gradient-to-br from-[#eff6ff] to-[#e0e7ff]' },
-      ruby: { ring: 'ring-rose-300', border: 'border-rose-500', bg: 'bg-gradient-to-br from-[#fff1f2] to-[#ffe4e6]' },
-      wood: { ring: 'ring-amber-700/50', border: 'border-amber-800', bg: 'bg-gradient-to-br from-[#faf8f5] to-[#f5efe6]' },
-      dark: { ring: 'ring-emerald-400/50', border: 'border-slate-600', bg: 'bg-gradient-to-br from-slate-900 to-slate-950 text-white' },
-      silver: { ring: 'ring-slate-300', border: 'border-slate-400', bg: 'bg-gradient-to-br from-[#f8fafc] to-[#f1f5f9]' }
-    };
-
-    const currentPalette = FRAME_PALETTES[frameColor] || FRAME_PALETTES.gold;
 
     if (isSpouse) {
       return {
         border: isSelected
-          ? `border-rose-500 ring-4 ring-rose-300/80 shadow-2xl z-20 ${currentPalette.bg}`
-          : `border-rose-400 hover:border-rose-500 hover:shadow-lg z-10 ${currentPalette.bg}`,
+          ? 'border-rose-500 ring-4 ring-rose-300/60 shadow-xl z-20 bg-rose-50/30'
+          : 'border-rose-400 hover:border-rose-500 hover:shadow-lg z-10 bg-white',
         badgeBg: 'bg-gradient-to-r from-rose-600 via-pink-600 to-amber-600 text-white font-extrabold',
         badgeText: '💍 Pasangan',
         noBadge: 'bg-rose-950 text-rose-200',
@@ -2212,8 +2118,8 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
     if (m.trah === 'ayah') {
       return {
         border: isSelected
-          ? `border-blue-600 ring-4 ${currentPalette.ring} shadow-2xl z-20 ${currentPalette.bg}`
-          : `${currentPalette.border} hover:border-blue-500 hover:shadow-lg z-10 ${currentPalette.bg}`,
+          ? 'border-blue-600 ring-4 ring-blue-300/60 shadow-xl z-20 bg-blue-50/30'
+          : 'border-blue-400 hover:border-blue-500 hover:shadow-lg z-10 bg-white',
         badgeBg: 'bg-blue-600 text-white font-bold',
         badgeText: 'Trah Ayah',
         noBadge: 'bg-blue-950 text-blue-200',
@@ -2224,8 +2130,8 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
     if (m.trah === 'ibu') {
       return {
         border: isSelected
-          ? `border-purple-600 ring-4 ${currentPalette.ring} shadow-2xl z-20 ${currentPalette.bg}`
-          : `${currentPalette.border} hover:border-purple-500 hover:shadow-lg z-10 ${currentPalette.bg}`,
+          ? 'border-purple-600 ring-4 ring-purple-300/60 shadow-xl z-20 bg-purple-50/30'
+          : 'border-purple-400 hover:border-purple-500 hover:shadow-lg z-10 bg-white',
         badgeBg: 'bg-purple-600 text-white font-bold',
         badgeText: 'Trah Ibu',
         noBadge: 'bg-purple-950 text-purple-200',
@@ -2233,23 +2139,11 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
       };
     }
 
-    if (m.trah === 'pasangan') {
-      return {
-        border: isSelected
-          ? `border-amber-600 ring-4 ${currentPalette.ring} shadow-2xl z-20 ${currentPalette.bg}`
-          : `${currentPalette.border} hover:border-amber-500 hover:shadow-lg z-10 ${currentPalette.bg}`,
-        badgeBg: 'bg-amber-600 text-white font-bold',
-        badgeText: 'Trah Pasangan',
-        noBadge: 'bg-amber-950 text-amber-200',
-        tagColor: 'bg-amber-100 text-amber-800 border border-amber-200'
-      };
-    }
-
     // Keluarga Inti
     return {
       border: isSelected
-        ? `border-emerald-600 ring-4 ${currentPalette.ring} shadow-2xl z-20 ${currentPalette.bg}`
-        : `${currentPalette.border} hover:border-emerald-500 hover:shadow-lg z-10 ${currentPalette.bg}`,
+        ? 'border-emerald-600 ring-4 ring-emerald-300/60 shadow-xl z-20 bg-emerald-50/30'
+        : 'border-emerald-400 hover:border-emerald-500 hover:shadow-lg z-10 bg-white',
       badgeBg: 'bg-emerald-700 text-white font-bold',
       badgeText: 'Keluarga Inti',
       noBadge: 'bg-slate-900 text-[#5eead4]',
@@ -2263,10 +2157,29 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
     const drawnSpouses = new Set<string>();
 
     displayedMembers.forEach(m => {
-      // 1. PASANGAN: Garis lurus/siku emas-rose beda warna dengan cincin pernikahan 💍
-      if (m.spouseId) {
-        const spouse = displayedMembers.find(s => s.id === m.spouseId);
-        const pairKey = [m.id, m.spouseId].sort().join('_');
+      // 1. PASANGAN (Mendukung Multi-Istri / Poligini): Garis lurus/siku emas-rose dengan cincin 💍
+      const spouseTargets: Array<{ id: string; order?: number; note?: string }> = [];
+      if (m.spouseId) spouseTargets.push({ id: m.spouseId });
+      if (m.spouseIds) {
+        m.spouseIds.forEach(sid => {
+          if (!spouseTargets.some(st => st.id === sid)) spouseTargets.push({ id: sid });
+        });
+      }
+      if (m.spouses) {
+        m.spouses.forEach(sp => {
+          const idx = spouseTargets.findIndex(st => st.id === sp.id);
+          if (idx >= 0) {
+            spouseTargets[idx].order = sp.order;
+            spouseTargets[idx].note = sp.note;
+          } else {
+            spouseTargets.push({ id: sp.id, order: sp.order, note: sp.note });
+          }
+        });
+      }
+
+      spouseTargets.forEach(spInfo => {
+        const spouse = displayedMembers.find(s => s.id === spInfo.id);
+        const pairKey = [m.id, spInfo.id].sort().join('_');
         if (spouse && !drawnSpouses.has(pairKey)) {
           drawnSpouses.add(pairKey);
           const isLeft = (m.canvasX ?? 0) <= (spouse.canvasX ?? 0);
@@ -2285,6 +2198,8 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
             ? `M ${x1} ${y1} L ${x2} ${y2}`
             : `M ${x1} ${y1} H ${midX} V ${y2} H ${x2}`;
 
+          const wifeOrderLabel = spInfo.order || spouse.spouseOrder || (m.gender === 'P' ? m.spouseOrder : undefined);
+
           lines.push(
             <g key={`sp_${pairKey}`}>
               <path
@@ -2295,17 +2210,22 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
                 strokeDasharray="6,4"
                 strokeLinecap="round"
               />
-              <circle cx={midX} cy={midY} r="12" fill="#fff1f2" stroke="#f43f5e" strokeWidth="2.5" />
-              <text x={midX} y={midY + 4} textAnchor="middle" fontSize="12" fill="#e11d48" fontWeight="bold">
-                💍
+              <circle cx={midX} cy={midY} r="13" fill="#fff1f2" stroke="#f43f5e" strokeWidth="2.5" />
+              <text x={midX} y={midY + 4} textAnchor="middle" fontSize="10" fill="#e11d48" fontWeight="bold">
+                💍{wifeOrderLabel ? `${wifeOrderLabel}` : ''}
               </text>
             </g>
           );
 
-          // Cabang bus-bar bersama pasangan ke anak-anak
-          const coupleChildren = displayedMembers.filter(
-            c => c.parentId === leftCard.id || c.parentId === rightCard.id
-          );
+          // Cabang bus-bar bersama pasangan ke anak-anak (filter akurat sesuai ibu kandung jika poligini)
+          const coupleChildren = displayedMembers.filter(c => {
+            const isChildOfFather = c.parentId === leftCard.id || c.parentId === rightCard.id;
+            const isChildOfMother = c.motherId === leftCard.id || c.motherId === rightCard.id;
+            if (c.motherId) {
+              return isChildOfFather && (c.motherId === leftCard.id || c.motherId === rightCard.id);
+            }
+            return isChildOfFather || isChildOfMother;
+          });
 
           if (coupleChildren.length > 0) {
             const trunkY = Math.max(
@@ -2319,7 +2239,7 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
             lines.push(
               <path
                 key={`couple_trunk_${pairKey}`}
-                d={`M ${midX} ${midY + 12} V ${busY}`}
+                d={`M ${midX} ${midY + 13} V ${busY}`}
                 fill="none"
                 stroke="#059669"
                 strokeWidth="3.5"
@@ -2363,7 +2283,7 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
             });
           }
         }
-      }
+      });
 
       // 2. ORANG TUA TUNGGAL -> ANAK (Garis Siku 90° Bersih)
       if (m.parentId) {
@@ -2487,6 +2407,11 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
     address?: string;
     phone?: string;
     photo?: string;
+    // Multi-Istri (Poligini)
+    spouseOrder?: number;
+    marriageNote?: string;
+    motherId?: string;
+    motherName?: string;
   }) => {
     if (!quickAddModal.targetMember) return;
     const target = quickAddModal.targetMember;
@@ -2510,9 +2435,12 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
       desiredX = targetX + (CANVAS_CARD_WIDTH / 2 + 15);
       preferredShift = 'right';
     } else if (rel === 'pasangan') {
-      // PASANGAN -> KANAN sejajar Y
+      // PASANGAN / ISTRI -> KANAN sejajar Y
       desiredY = targetY;
-      desiredX = targetX + CANVAS_CARD_WIDTH + CANVAS_GAP_X;
+      const existingWivesCount = (target.spouses?.length || (target.spouseId ? 1 : 0));
+      const order = data.spouseOrder || (existingWivesCount + 1);
+      // Posisikan berurutan ke kanan untuk istri ke-1, 2, 3, dst.
+      desiredX = targetX + (CANVAS_CARD_WIDTH + CANVAS_GAP_X) * order;
       preferredShift = 'right';
     } else if (rel === 'kakak') {
       // KAKAK -> KIRI sejajar Y
@@ -2538,7 +2466,14 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
         const maxChildX = Math.max(...existingChildren.map(c => c.canvasX ?? targetX));
         desiredX = maxChildX + CANVAS_CARD_WIDTH + CANVAS_GAP_X;
       } else {
-        if (target.spouseId) {
+        if (data.motherId) {
+          const mother = members.find(m => m.id === data.motherId);
+          if (mother) {
+            desiredX = Math.round((targetX + (mother.canvasX ?? targetX)) / 2);
+          } else {
+            desiredX = targetX;
+          }
+        } else if (target.spouseId) {
           const sp = members.find(s => s.id === target.spouseId);
           const spouseX = sp?.canvasX ?? targetX;
           desiredX = Math.round((targetX + spouseX) / 2);
@@ -2566,8 +2501,15 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
       role = 'Ibu';
     } else if (rel === 'pasangan') {
       relationValue = 'pasangan';
-      kinshipTitle = data.gender === 'L' ? 'Suami' : 'Istri';
-      role = data.gender === 'L' ? 'Suami' : 'Istri';
+      const existingWivesCount = (target.spouses?.length || (target.spouseId ? 1 : 0));
+      const order = data.spouseOrder || (existingWivesCount + 1);
+      if (data.gender === 'P' && (existingWivesCount > 0 || data.spouseOrder)) {
+        kinshipTitle = `Istri Ke-${order}`;
+        role = `Istri Ke-${order}`;
+      } else {
+        kinshipTitle = data.gender === 'L' ? 'Suami' : 'Istri';
+        role = data.gender === 'L' ? 'Suami' : 'Istri';
+      }
     } else if (rel === 'anak') {
       relationValue = 'anak';
       const childCount = members.filter(m => m.parentId === target.id || (target.spouseId && m.parentId === target.spouseId)).length + 1;
@@ -2599,6 +2541,8 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
       role
     }, members);
 
+    const spouseOrderFinal = rel === 'pasangan' ? (data.spouseOrder || ((target.spouses?.length || (target.spouseId ? 1 : 0)) + 1)) : undefined;
+
     const newMember: FamilyMember = {
       id: newId,
       name: data.name.trim(),
@@ -2621,13 +2565,64 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
       memberNo: nextMemberNo,
       parentId: rel === 'anak' ? target.id : undefined,
       spouseId: rel === 'pasangan' ? target.id : undefined,
+      spouseIds: rel === 'pasangan' ? [target.id] : undefined,
+      spouseOrder: spouseOrderFinal,
+      marriageNote: rel === 'pasangan' ? data.marriageNote : undefined,
+      motherId: rel === 'anak' ? (data.motherId || (target.gender === 'P' ? target.id : target.spouseId)) : undefined,
+      motherName: rel === 'anak' ? data.motherName : undefined,
       siblingId: rel === 'kakak' || rel === 'adik' ? target.id : undefined
     };
 
     setMembers(prev => {
       let updated = [...prev];
       if (rel === 'pasangan') {
-        updated = updated.map(m => (m.id === target.id ? { ...m, spouseId: newId } : m));
+        const newSpouseEntry: FamilySpouse = {
+          id: newId,
+          name: data.name.trim(),
+          order: spouseOrderFinal,
+          note: data.marriageNote
+        };
+        updated = updated.map(m => {
+          if (m.id === target.id) {
+            const currentSpouses = m.spouses ? [...m.spouses] : [];
+            if (currentSpouses.length === 0 && m.spouseId) {
+              const oldSpouse = prev.find(p => p.id === m.spouseId);
+              currentSpouses.push({
+                id: m.spouseId,
+                name: oldSpouse?.name || 'Istri Pertama',
+                order: 1
+              });
+            }
+            currentSpouses.push(newSpouseEntry);
+            const currentSpouseIds = m.spouseIds ? [...m.spouseIds] : m.spouseId ? [m.spouseId] : [];
+            if (!currentSpouseIds.includes(newId)) currentSpouseIds.push(newId);
+
+            return {
+              ...m,
+              spouseId: m.spouseId || newId,
+              spouseIds: currentSpouseIds,
+              spouses: currentSpouses
+            };
+          }
+          return m;
+        });
+      } else if (rel === 'anak' && data.motherId) {
+        // Link child into the specific mother's childrenIds on father's spouses record
+        updated = updated.map(m => {
+          if (m.id === target.id && m.spouses) {
+            const updatedSpouses = m.spouses.map(s => {
+              if (s.id === data.motherId) {
+                return {
+                  ...s,
+                  childrenIds: [...(s.childrenIds || []), newId]
+                };
+              }
+              return s;
+            });
+            return { ...m, spouses: updatedSpouses };
+          }
+          return m;
+        });
       }
       return [...updated, newMember];
     });
@@ -3736,14 +3731,11 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
   const mainSpouse = members.find(m => m.trah === 'inti' && (m.relation === 'ibu' || m.role?.toLowerCase().includes('istri'))) || members.find(m => m.id === '2');
   const mainChildren = members.filter(m => m.trah === 'inti' && m.relation === 'anak');
 
-  // Filtered members for Tree View (Semua, Trah Ayah, Trah Ibu, Inti, Pasangan, 4 Trah Matrix)
+  // Filtered members for Tree View (Semua, Trah Ayah, Trah Ibu)
   const displayedMembers = members.filter(m => {
     if (treeFilter === 'all') return true;
     if (treeFilter === 'ayah') return m.trah === 'ayah' || m.trah === 'inti';
     if (treeFilter === 'ibu') return m.trah === 'ibu' || m.trah === 'inti';
-    if (treeFilter === 'inti') return m.trah === 'inti';
-    if (treeFilter === 'pasangan') return m.trah === 'pasangan' || m.relation === 'pasangan';
-    if (treeFilter === 'gabung4') return true;
     return true;
   });
 
@@ -3777,15 +3769,27 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
           </div>
         </div>
 
-        {/* Quick Top Right Actions: Kelola KK, Buku Silsilah, Bersihkan Mock */}
+        {/* Quick Top Right Actions: Grid Canvas, Kelola KK, Buku Silsilah, Bersihkan Mock */}
         <div className="flex items-center space-x-1.5">
           <button
+            onClick={() => setActiveTab(activeTab === 'gridcanvas' ? 'silsilah' : 'gridcanvas')}
+            className={`text-[11px] font-bold px-2 py-1.5 rounded-lg flex items-center space-x-1 transition shadow-xs active:scale-95 border ${
+              activeTab === 'gridcanvas'
+                ? 'bg-emerald-400 text-emerald-950 border-emerald-300 font-extrabold shadow-md'
+                : 'bg-emerald-950/50 hover:bg-emerald-950 text-white border-emerald-400/50'
+            }`}
+            title="Buka Grid Canvas Engine (Zero Collision Matrix)"
+          >
+            <LayoutGrid className="w-3.5 h-3.5 text-[#5eead4]" />
+            <span className="hidden xs:inline">Grid Canvas</span>
+          </button>
+          <button
             onClick={() => handleOpenKkModal('manual')}
-            className="bg-emerald-950/40 hover:bg-emerald-950/60 active:scale-95 text-white border border-emerald-400/50 text-[11px] font-bold px-2.5 py-1.5 rounded-lg flex items-center space-x-1 transition shadow-xs"
+            className="bg-emerald-950/40 hover:bg-emerald-950/60 active:scale-95 text-white border border-emerald-400/50 text-[11px] font-bold px-2 py-1.5 rounded-lg flex items-center space-x-1 transition shadow-xs"
             title="Kelola & Buat Kartu Keluarga"
           >
             <Camera className="w-3.5 h-3.5 text-[#5eead4]" />
-            <span className="text-white">KK &amp; Scan</span>
+            <span className="text-white hidden sm:inline">KK &amp; Scan</span>
           </button>
           <button
             onClick={() => setShowPdfModal(true)}
@@ -3805,7 +3809,7 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
       </header>
 
       {/* SCROLLABLE MAIN CONTENT AREA */}
-      <main className="flex-1 overflow-y-auto no-scrollbar p-3.5 space-y-3.5 pb-24">
+      <main className={`flex-1 ${activeTab === 'gridcanvas' ? 'overflow-hidden p-0 pb-16 flex flex-col' : 'overflow-y-auto no-scrollbar p-3.5 space-y-3.5 pb-24'}`}>
 
         {/* TAB 1: POHON SILSILAH INTERAKTIF (TREE VIEW & MULTI-SPOUSE) */}
         {activeTab === 'silsilah' && (
@@ -4001,245 +4005,89 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
                 </div>
               </div>
 
-              {/* Trah Filter Pill Buttons (Semua, Ayah, Ibu, Inti, Pasangan, 4 Trah Matrix) */}
-              <div className="grid grid-cols-3 sm:grid-cols-6 gap-1 bg-[#f0fdf4] p-1.5 rounded-2xl border border-emerald-200 text-[11px] font-bold shadow-2xs">
+              {/* Trah Filter Pill Buttons (Fokus: Semua, Trah Ayah, Trah Ibu) */}
+              <div className="grid grid-cols-3 gap-1.5 bg-[#f0fdf4] p-1.5 rounded-2xl border border-emerald-200 text-xs font-bold shadow-2xs">
                 <button
-                  type="button"
                   onClick={() => setTreeFilter('all')}
-                  className={`py-1.5 px-1 rounded-xl transition flex items-center justify-center gap-1 text-center ${
+                  className={`py-2 px-1 rounded-xl transition flex items-center justify-center gap-1.5 text-center ${
                     treeFilter === 'all'
                       ? 'bg-emerald-700 text-white shadow-xs'
                       : 'text-slate-600 hover:text-emerald-800 hover:bg-emerald-100/60'
                   }`}
                 >
-                  <Users className="w-3 h-3" />
+                  <Users className="w-3.5 h-3.5" />
                   <span>Semua ({members.length})</span>
                 </button>
                 <button
-                  type="button"
                   onClick={() => setTreeFilter('ayah')}
-                  className={`py-1.5 px-1 rounded-xl transition flex items-center justify-center gap-1 text-center ${
+                  className={`py-2 px-1 rounded-xl transition flex items-center justify-center gap-1.5 text-center ${
                     treeFilter === 'ayah'
                       ? 'bg-blue-700 text-white shadow-xs'
                       : 'text-blue-900 hover:text-blue-700 hover:bg-blue-50'
                   }`}
                 >
-                  <span>👨 Ayah ({members.filter(m => m.trah === 'ayah' || m.trah === 'inti').length})</span>
+                  <span>👨 Trah Ayah ({members.filter(m => m.trah === 'ayah' || m.trah === 'inti').length})</span>
                 </button>
                 <button
-                  type="button"
                   onClick={() => setTreeFilter('ibu')}
-                  className={`py-1.5 px-1 rounded-xl transition flex items-center justify-center gap-1 text-center ${
+                  className={`py-2 px-1 rounded-xl transition flex items-center justify-center gap-1.5 text-center ${
                     treeFilter === 'ibu'
                       ? 'bg-purple-700 text-white shadow-xs'
                       : 'text-purple-900 hover:text-purple-700 hover:bg-purple-50'
                   }`}
                 >
-                  <span>👩 Ibu ({members.filter(m => m.trah === 'ibu' || m.trah === 'inti').length})</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTreeFilter('inti')}
-                  className={`py-1.5 px-1 rounded-xl transition flex items-center justify-center gap-1 text-center ${
-                    treeFilter === 'inti'
-                      ? 'bg-emerald-800 text-white shadow-xs'
-                      : 'text-emerald-900 hover:text-emerald-700 hover:bg-emerald-50'
-                  }`}
-                >
-                  <span>🏡 Inti ({members.filter(m => m.trah === 'inti').length})</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTreeFilter('pasangan')}
-                  className={`py-1.5 px-1 rounded-xl transition flex items-center justify-center gap-1 text-center ${
-                    treeFilter === 'pasangan'
-                      ? 'bg-amber-600 text-white shadow-xs'
-                      : 'text-amber-900 hover:text-amber-700 hover:bg-amber-50'
-                  }`}
-                >
-                  <span>💍 Pasangan ({members.filter(m => m.trah === 'pasangan' || m.relation === 'pasangan').length})</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTreeFilter('gabung4');
-                    handleApplyLayout('matrix_4trah');
-                  }}
-                  className={`py-1.5 px-1 rounded-xl transition flex items-center justify-center gap-1 text-center ${
-                    treeFilter === 'gabung4'
-                      ? 'bg-indigo-700 text-white shadow-xs ring-2 ring-indigo-300'
-                      : 'text-indigo-900 hover:text-indigo-700 hover:bg-indigo-50'
-                  }`}
-                  title="Gabung 4 Trah (Matrix X, Y: Ayah User, Ibu User, Ayah Pasangan, Ibu Pasangan)"
-                >
-                  <Crosshair className="w-3 h-3 text-amber-300" />
-                  <span>🌐 4 Trah (X,Y)</span>
+                  <span>👩 Trah Ibu ({members.filter(m => m.trah === 'ibu' || m.trah === 'inti').length})</span>
                 </button>
               </div>
 
-              {/* BARIS UTAMA: BATCH ISI CEPAT + OPSI KERTAS A0-A4 + WARNA FRAME + UKURAN FOTO + POLA SERI/PARALEL */}
-              <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 p-2.5 rounded-2xl text-white shadow-md border border-emerald-500/30 space-y-2">
-                {/* Baris 1: Tombol Batch Cepat + Pola Tata Letak */}
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {/* TOMBOL BATCH ISI CEPAT */}
-                    <button
-                      type="button"
-                      onClick={() => setShowBatchAddModal(true)}
-                      className="bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-600 hover:to-yellow-500 text-slate-950 text-xs font-black px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 shadow-md shadow-amber-500/30 transition active:scale-95 border border-yellow-200"
-                      title="Tambah silsilah bertingkat sekaligus: Uyut -> Anak 1..5 -> Cucu 2.1..2.3"
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-amber-900 fill-amber-900" />
-                      <span>✨ Batch Isi Cepat (Uyut &rarr; Anak &rarr; Cucu)</span>
-                    </button>
+              {/* Action Bar: Tata Trah 3 Sayap, Fullscreen, Simpan, Unduh Upscale A4-A0 & Canvas Mode */}
+              <div className="flex flex-wrap items-center justify-between gap-1.5 pt-0.5">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    onClick={handleApplyThreeWingsLayout}
+                    className="bg-emerald-100 hover:bg-emerald-200 text-emerald-950 text-[11px] font-black px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 transition active:scale-95 border border-emerald-300 shadow-2xs"
+                    title="Tata otomatis: Trah Ayah KIRI, Trah Ibu KANAN, Keluarga Inti BAWAH"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Tata Trah (3 Sayap)</span>
+                  </button>
 
-                    {/* SELECTOR POLA TATA LETAK (SERI / PARALEL / 3 SAYAP / 4 TRAH) */}
-                    <div className="flex items-center gap-1 bg-white/10 px-2 py-1 rounded-xl border border-white/15 text-[11px]">
-                      <span className="text-emerald-300 font-bold">Pola:</span>
-                      <select
-                        value={layoutMode}
-                        onChange={e => handleApplyLayout(e.target.value as any)}
-                        className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
-                      >
-                        <option value="three_wings" className="text-slate-900">3 Sayap Klasik</option>
-                        <option value="seri" className="text-slate-900">Seri (1, 2, 3, 4, 5 Mendatar)</option>
-                        <option value="paralel" className="text-slate-900">Paralel (Cabang 2.1, 2.2 Berkolom)</option>
-                        <option value="matrix_4trah" className="text-slate-900">Matrix 4 Trah (X, Y 4 Kuadran)</option>
-                      </select>
-                    </div>
+                  <button
+                    onClick={toggleCanvasFullscreen}
+                    className="bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 transition active:scale-95 shadow-2xs"
+                    title="Tampilkan Kanvas Silsilah Layar Penuh (Fullscreen)"
+                  >
+                    <Maximize2 className="w-3.5 h-3.5 text-[#5eead4]" />
+                    <span>Layar Penuh</span>
+                  </button>
 
-                    <button
-                      type="button"
-                      onClick={() => handleApplyLayout(layoutMode)}
-                      className="bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 transition active:scale-95 shadow-xs"
-                      title="Tata ulang otomatis posisi kartu silsilah"
-                    >
-                      <Sparkles className="w-3 h-3 text-[#5eead4]" />
-                      <span>Auto Tata</span>
-                    </button>
-                  </div>
+                  <button
+                    onClick={handleSaveCanvasLayout}
+                    className="bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 text-[11px] font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 transition active:scale-95 shadow-2xs"
+                    title="Simpan Posisi Kartu & Zoom ke Penyimpanan Lokal"
+                  >
+                    <Save className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Simpan</span>
+                  </button>
 
-                  <div className="flex items-center gap-1.5">
-                    {/* TOMBOL PUTAR KANVAS 90° */}
-                    <button
-                      type="button"
-                      onClick={handleRotateCanvas}
-                      className="bg-white/15 hover:bg-white/25 text-white text-[11px] font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 transition active:scale-95"
-                      title="Putar orientasi kanvas & kertas 90° (Landscape <=> Portrait)"
-                    >
-                      <RotateCw className="w-3 h-3 text-amber-300" />
-                      <span>Putar 90°</span>
-                    </button>
-
-                    {/* TOMBOL SIMPAN POSISI */}
-                    <button
-                      type="button"
-                      onClick={handleSaveCanvasLayout}
-                      className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-[11px] font-black px-3 py-1.5 rounded-xl flex items-center gap-1 transition active:scale-95 shadow-sm"
-                      title="Simpan posisi kartu dan zoom ke penyimpanan perangkat"
-                    >
-                      <Save className="w-3 h-3 text-slate-950" />
-                      <span>Simpan Posisi</span>
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => setCanvasLayoutMode(m => m === 'modular' ? 'grid' : 'modular')}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 transition"
+                  >
+                    <Layers className="w-3.5 h-3.5 text-slate-600" />
+                    <span>{canvasLayoutMode === 'modular' ? 'Kanvas' : 'Grid'}</span>
+                  </button>
                 </div>
 
-                {/* Baris 2: Opsi Kanvas A0-A4, Warna Frame, Ukuran Card/Foto A4-A7, Export */}
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-white/10 text-[11px]">
-                  <div className="flex flex-wrap items-center gap-2">
-                    {/* SELECTOR KERTAS KANVAS (A0 - A4) */}
-                    <div className="flex items-center gap-1 bg-white/10 px-2 py-1 rounded-xl border border-white/15">
-                      <span className="text-amber-300 font-bold">Kertas:</span>
-                      <select
-                        value={paperCanvasSize}
-                        onChange={e => {
-                          const val = e.target.value as any;
-                          setPaperCanvasSize(val);
-                          showNotification(`Bidang kanvas disesuaikan ke format ${val}!`);
-                        }}
-                        className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
-                      >
-                        <option value="A0" className="text-slate-900">A0 (Poster Akbar 1189x841 mm)</option>
-                        <option value="A1" className="text-slate-900">A1 (Poster Besar 841x594 mm)</option>
-                        <option value="A2" className="text-slate-900">A2 (Bagan Sedang 594x420 mm)</option>
-                        <option value="A3" className="text-slate-900">A3 (Buku / Meja 420x297 mm)</option>
-                        <option value="A4" className="text-slate-900">A4 (Standar HVS 297x210 mm)</option>
-                      </select>
-                      <button
-                        type="button"
-                        onClick={() => setPaperOrientation(o => o === 'landscape' ? 'portrait' : 'landscape')}
-                        className="text-[9px] bg-white/20 hover:bg-white/30 text-amber-200 px-1.5 py-0.5 rounded ml-1 font-mono uppercase font-black"
-                        title="Ubah orientasi Mendatar / Tegak"
-                      >
-                        {paperOrientation === 'landscape' ? 'Mendatar' : 'Tegak'}
-                      </button>
-                    </div>
-
-                    {/* SELECTOR WARNA FRAME */}
-                    <div className="flex items-center gap-1 bg-white/10 px-2 py-1 rounded-xl border border-white/15">
-                      <Palette className="w-3 h-3 text-pink-300" />
-                      <span className="text-pink-200 font-bold">Frame:</span>
-                      <select
-                        value={frameColor}
-                        onChange={e => {
-                          const val = e.target.value as any;
-                          setFrameColor(val);
-                          showNotification(`Warna frame kartu diubah ke ${val}!`);
-                        }}
-                        className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
-                      >
-                        <option value="gold" className="text-slate-900">Emas Keraton (Gold)</option>
-                        <option value="emerald" className="text-slate-900">Hijau Zamrud (WargaQu)</option>
-                        <option value="sapphire" className="text-slate-900">Biru Safir Ningrat</option>
-                        <option value="ruby" className="text-slate-900">Merah Marun (Ruby)</option>
-                        <option value="wood" className="text-slate-900">Kayu Jati Cokelat</option>
-                        <option value="dark" className="text-slate-900">Hitam Onyx Modern</option>
-                        <option value="silver" className="text-slate-900">Perak Minimalis</option>
-                      </select>
-                    </div>
-
-                    {/* SELECTOR UKURAN KARTU & FOTO (A4 - A7) */}
-                    <div className="flex items-center gap-1 bg-white/10 px-2 py-1 rounded-xl border border-white/15">
-                      <span className="text-cyan-300 font-bold">Ukuran Kartu:</span>
-                      <select
-                        value={cardScale}
-                        onChange={e => {
-                          const val = e.target.value as any;
-                          setCardScale(val);
-                          showNotification(`Skala kartu diatur ke proporsi ${val}!`);
-                        }}
-                        className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
-                      >
-                        <option value="A7" className="text-slate-900">A7 - Ringkas Kompak</option>
-                        <option value="A6" className="text-slate-900">A6 - Standar Seimbang</option>
-                        <option value="A5" className="text-slate-900">A5 - Besar Jelas</option>
-                        <option value="A4" className="text-slate-900">A4 - Poster Akbar</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-1.5">
-                    {/* FULLSCREEN */}
-                    <button
-                      type="button"
-                      onClick={toggleCanvasFullscreen}
-                      className="bg-white/15 hover:bg-white/25 text-white text-[11px] font-bold px-2.5 py-1 rounded-xl flex items-center gap-1 transition active:scale-95"
-                    >
-                      <Maximize2 className="w-3 h-3 text-[#5eead4]" />
-                      <span>{isCanvasFullscreen ? 'Keluar Full' : 'Layar Penuh'}</span>
-                    </button>
-
-                    {/* UNDUH UPSCALE */}
-                    <button
-                      type="button"
-                      onClick={() => setShowUpscaleModal(true)}
-                      className="bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white text-[11px] font-black px-3 py-1 rounded-xl flex items-center gap-1 shadow-xs transition active:scale-95 border border-amber-400/40"
-                      title="Simpan untuk dicetak: Auto Upscale A4 sampai A0 agar tajam tanpa pecah"
-                    >
-                      <Download className="w-3 h-3 text-amber-200" />
-                      <span>Cetak Upscale (A4-A0)</span>
-                    </button>
-                  </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setShowUpscaleModal(true)}
+                    className="bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-xs transition active:scale-95"
+                    title="Unduh & cetak silsilah resolusi tinggi tajam opsi A4 sampai A0"
+                  >
+                    <Download className="w-3.5 h-3.5 text-amber-200" />
+                    <span>Unduh Upscale (A4 - A0)</span>
+                  </button>
                 </div>
               </div>
 
@@ -4271,56 +4119,17 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1">
                         <button
-                          type="button"
                           onClick={() => setEditingMember(targetCard)}
-                          className="bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-md transition active:scale-95"
-                          title="Klaim kartu ini untuk melengkapi data, nomor urut, dan pas foto auto kompres"
+                          className="bg-white/20 hover:bg-white/30 text-white text-[10px] font-bold px-2 py-1 rounded-lg flex items-center gap-1 transition"
                         >
-                          <Edit2 className="w-3.5 h-3.5" />
-                          <span>Klaim / Lengkapi Data</span>
+                          <Edit2 className="w-3 h-3" />
+                          <span>Edit</span>
                         </button>
-
-                        <label
-                          className="bg-emerald-700 hover:bg-emerald-600 text-white p-1.5 rounded-xl cursor-pointer shadow-xs transition active:scale-95 flex items-center gap-1 text-[10px] font-bold"
-                          title="Ambil Pas Foto Langsung (Kamera HP) Auto Kompres"
-                        >
-                          <Camera className="w-3.5 h-3.5" />
-                          <span className="hidden sm:inline">Kamera</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            capture="user"
-                            onChange={e => {
-                              const f = e.target.files?.[0];
-                              if (f) handleCardDirectPhoto(targetCard.id, f);
-                            }}
-                            className="hidden"
-                          />
-                        </label>
-
-                        <label
-                          className="bg-white hover:bg-slate-100 text-slate-700 p-1.5 rounded-xl cursor-pointer shadow-xs transition active:scale-95 flex items-center gap-1 text-[10px] font-bold"
-                          title="Pilih Pas Foto dari Galeri HP/PC Auto Kompres"
-                        >
-                          <ImageIcon className="w-3.5 h-3.5 text-emerald-700" />
-                          <span className="hidden sm:inline">Galeri</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={e => {
-                              const f = e.target.files?.[0];
-                              if (f) handleCardDirectPhoto(targetCard.id, f);
-                            }}
-                            className="hidden"
-                          />
-                        </label>
-
                         <button
-                          type="button"
                           onClick={() => setSelectedCardId(null)}
-                          className="text-slate-400 hover:text-white p-1.5 rounded-xl"
+                          className="text-slate-400 hover:text-white p-1 rounded-lg"
                         >
                           <X className="w-4 h-4" />
                         </button>
@@ -4503,71 +4312,16 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
                     style={{
                       transform: `scale(${treeZoom})`,
                       transformOrigin: 'top left',
-                      width: `${canvasWidth}px`,
-                      height: `${canvasHeight}px`,
+                      width: '3800px',
+                      height: '2600px',
                       position: 'relative'
                     }}
                     className="transition-transform duration-100"
                   >
-                    {/* PAPER BOUNDARY GUIDE (A0 - A4) */}
-                    <div
-                      style={{
-                        position: 'absolute',
-                        left: 24,
-                        top: 24,
-                        width: `${canvasWidth - 48}px`,
-                        height: `${canvasHeight - 48}px`,
-                        pointerEvents: 'none'
-                      }}
-                      className="border-2 border-dashed border-emerald-400/40 rounded-3xl z-0"
-                    >
-                      <div className="absolute top-3 left-4 text-[10px] font-mono font-bold text-emerald-800/80 bg-white/95 backdrop-blur-xs px-2.5 py-1 rounded-lg border border-emerald-300 shadow-2xs">
-                        📐 Kertas Cetak: {paperCanvasSize} ({currentPaper.mm}) • Orientasi {paperOrientation === 'landscape' ? 'Mendatar (Landscape)' : 'Tegak (Portrait)'}
-                      </div>
-                      <div className="absolute bottom-3 right-4 text-[9px] font-mono font-bold text-slate-500 bg-white/85 px-2 py-0.5 rounded">
-                        LeluhurQu • WargaQu
-                      </div>
-                    </div>
-
-                    {/* SALIB SUMBU 4 KUADRAN (JIKA MODE MATRIX 4 TRAH ATAU FILTER GABUNG4 AKTIF) */}
-                    {(layoutMode === 'matrix_4trah' || treeFilter === 'gabung4') && (
-                      <div className="absolute inset-0 pointer-events-none z-0">
-                        {/* Garis Horizontal X */}
-                        <div
-                          style={{ top: '1300px' }}
-                          className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-blue-300 via-emerald-500 to-purple-300 opacity-60"
-                        />
-                        {/* Garis Vertikal Y */}
-                        <div
-                          style={{ left: '1800px' }}
-                          className="absolute top-0 bottom-0 w-0.5 bg-gradient-to-b from-blue-300 via-emerald-500 to-amber-300 opacity-60"
-                        />
-                        {/* Quadrant Badges */}
-                        <div className="absolute top-12 left-12 bg-blue-100/90 text-blue-900 border border-blue-300 px-3 py-1 rounded-xl text-[11px] font-black shadow-xs">
-                          KUADRAN I: TRAH AYAH (USER)
-                        </div>
-                        <div className="absolute top-12 right-12 bg-purple-100/90 text-purple-900 border border-purple-300 px-3 py-1 rounded-xl text-[11px] font-black shadow-xs">
-                          KUADRAN II: TRAH IBU (USER)
-                        </div>
-                        <div className="absolute bottom-12 left-12 bg-amber-100/90 text-amber-900 border border-amber-300 px-3 py-1 rounded-xl text-[11px] font-black shadow-xs">
-                          KUADRAN III: TRAH AYAH (PASANGAN)
-                        </div>
-                        <div className="absolute bottom-12 right-12 bg-rose-100/90 text-rose-900 border border-rose-300 px-3 py-1 rounded-xl text-[11px] font-black shadow-xs">
-                          KUADRAN IV: TRAH IBU (PASANGAN)
-                        </div>
-                        <div
-                          style={{ left: '1800px', top: '1300px', transform: 'translate(-50%, -50%)' }}
-                          className="absolute bg-emerald-700 text-white border-2 border-[#5eead4] px-3 py-1 rounded-full text-[10px] font-black shadow-lg"
-                        >
-                          TITIK TEMU: USER &amp; PASANGAN
-                        </div>
-                      </div>
-                    )}
-
                     {/* SVG Auto Family Lines (Garis Siku 90° Orthogonal Bersih di Belakang Kartu) */}
                     <svg
                       className="absolute inset-0 w-full h-full pointer-events-none z-0"
-                      style={{ width: `${canvasWidth}px`, height: `${canvasHeight}px` }}
+                      style={{ width: '3800px', height: '2600px' }}
                     >
                       <defs>
                         <marker id="arrowHead" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
@@ -4683,17 +4437,12 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
                               </label>
                             </div>
 
-                            {/* Details: Nama Bersih [c]+[b], Pasangan, Bin/Binti, Status, Alamat */}
+                            {/* Details: Nama, Bin/Binti, Tahun, Alamat, No HP */}
                             <div className="min-w-0 flex-1 space-y-0.5">
-                              <h4 className="text-xs font-extrabold text-slate-900 leading-tight truncate" title={getCleanDisplayName(m)}>
-                                {getCleanDisplayName(m)}
+                              <h4 className="text-xs font-extrabold text-slate-900 leading-tight truncate" title={m.name}>
+                                {m.name}
                               </h4>
-                              {m.spouseRelation && (
-                                <p className="text-[9.5px] font-bold text-rose-700 bg-rose-50 px-1.5 py-0.2 rounded border border-rose-200 truncate inline-block" title={`Pasangan: ${m.spouseRelation}`}>
-                                  💍 {m.spouseRelation}
-                                </p>
-                              )}
-                              {m.binBinti && !m.spouseRelation && (
+                              {m.binBinti && (
                                 <p className="text-[10px] text-slate-500 truncate font-medium">
                                   {m.binBinti} {m.nickname ? `("${m.nickname}")` : ''}
                                 </p>
@@ -4706,7 +4455,7 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
                                     m.status === 'Almarhum' ? 'bg-slate-200 text-slate-600' : 'bg-emerald-100 text-emerald-800'
                                   }`}
                                 >
-                                  {m.status === 'Almarhum' ? 'Wafat' : 'Ada'}
+                                  {m.status}
                                 </span>
                               </div>
 
@@ -4742,6 +4491,29 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
                                   <Phone className="w-2.5 h-2.5" />
                                   <span>+ No HP</span>
                                 </button>
+                              )}
+
+                              {/* Multi-Istri Badge atau Keterangan Istri Ke-X / Anak dari Ibu X */}
+                              {m.gender === 'L' && ((m.spouses && m.spouses.length > 1) || (m.spouseIds && m.spouseIds.length > 1)) && (
+                                <div className="flex items-center gap-1 pt-0.5">
+                                  <span className="text-[8px] bg-rose-50 text-rose-700 border border-rose-200 px-1 py-0.2 rounded font-bold flex items-center gap-0.5" title={`Memiliki ${m.spouses?.length || m.spouseIds?.length} orang istri`}>
+                                    💍 Multi-Istri ({m.spouses?.length || m.spouseIds?.length})
+                                  </span>
+                                </div>
+                              )}
+                              {m.gender === 'P' && m.spouseOrder && (
+                                <div className="flex items-center gap-1 pt-0.5">
+                                  <span className="text-[8px] bg-rose-50 text-rose-700 border border-rose-200 px-1 py-0.2 rounded font-bold">
+                                    💍 Istri Ke-{m.spouseOrder}
+                                  </span>
+                                </div>
+                              )}
+                              {m.motherName && (
+                                <div className="flex items-center gap-1 pt-0.5">
+                                  <span className="text-[8px] bg-purple-50 text-purple-700 border border-purple-200 px-1 py-0.2 rounded font-bold truncate max-w-[130px]" title={`Ibu Kandung: ${m.motherName}`}>
+                                    🌸 Ibu: {m.motherName}
+                                  </span>
+                                </div>
                               )}
                             </div>
                           </div>
@@ -4830,13 +4602,8 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
                             )}
                           </div>
                           <div className="min-w-0 flex-1 space-y-0.5">
-                            <h4 className="text-xs font-bold text-slate-900 truncate" title={getCleanDisplayName(m)}>
-                              {getCleanDisplayName(m)}
-                            </h4>
-                            {m.spouseRelation && (
-                              <p className="text-[10px] font-bold text-rose-700 truncate">💍 {m.spouseRelation}</p>
-                            )}
-                            {m.binBinti && !m.spouseRelation && <p className="text-[10px] text-slate-500 truncate">{m.binBinti}</p>}
+                            <h4 className="text-xs font-bold text-slate-900 truncate">{m.name}</h4>
+                            <p className="text-[10px] text-slate-500 truncate">{m.binBinti || '-'}</p>
                             <p className="text-[9px] text-slate-600 font-mono font-bold">{getYearRangeDisplay(m)}</p>
                             {m.address && <p className="text-[9px] text-slate-500 truncate">📍 {m.address}</p>}
                             {m.phone && <p className="text-[9px] text-emerald-700 font-bold">📞 {m.phone}</p>}
@@ -4878,6 +4645,17 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* TAB BARU: GRID CANVAS ENGINE (SPATIAL MATRIX ZERO-COLLISION SVG) */}
+        {activeTab === 'gridcanvas' && (
+          <div className="flex-1 w-full h-full min-h-[500px] flex flex-col">
+            <GridCanvasEngine
+              members={members}
+              onBack={() => setActiveTab('silsilah')}
+              showNotification={showNotification}
+            />
           </div>
         )}
 
@@ -5242,6 +5020,22 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
         >
           <GitFork className={`w-5 h-5 rotate-180 ${activeTab === 'silsilah' ? 'text-emerald-700' : 'text-slate-400'}`} />
           <span className="text-[10px]">Silsilah</span>
+        </button>
+
+        {/* Tab BARU: Grid Canvas Engine */}
+        <button
+          onClick={() => setActiveTab('gridcanvas')}
+          className={`flex flex-col items-center gap-1 transition active:scale-95 relative ${
+            activeTab === 'gridcanvas' ? 'text-emerald-700 font-bold' : 'text-slate-400 hover:text-emerald-700 font-medium'
+          }`}
+        >
+          <div className="relative">
+            <LayoutGrid className={`w-5 h-5 ${activeTab === 'gridcanvas' ? 'text-emerald-700' : 'text-slate-400'}`} />
+            <span className="absolute -top-1 -right-2 px-1 py-0.2 bg-emerald-600 text-[8px] font-extrabold text-white rounded-full">
+              GRID
+            </span>
+          </div>
+          <span className="text-[10px]">Grid Canvas</span>
         </button>
 
         {/* Tab 2: Medsos Trah */}
@@ -6556,21 +6350,12 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
         </div>
       )}
 
-      {/* MODAL BATCH ISI CEPAT SILSILAH (UYUT -> ANAK 1..5 -> CUCU 2.1..2.3) */}
-      {showBatchAddModal && (
-        <BatchQuickAddModal
-          existingMembers={members}
-          onClose={() => setShowBatchAddModal(false)}
-          onSaveBatch={handleBatchSaveMembers}
-          showNotification={showNotification}
-        />
-      )}
-
       {/* MODAL QUICK ADD RELATIVE (+) */}
       {quickAddModal.open && quickAddModal.targetMember && (
         <QuickAddRelativeModalView
           target={quickAddModal.targetMember}
           relationType={quickAddModal.relationType}
+          existingMembers={members}
           onClose={() => setQuickAddModal({ open: false, targetMember: null, relationType: 'anak' })}
           onSubmit={handleQuickAddRelativeSubmit}
           showNotification={showNotification}
