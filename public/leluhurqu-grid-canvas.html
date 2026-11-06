@@ -25,6 +25,8 @@
       -webkit-user-select: none;
     }
     .font-mono-num { font-family: 'Space Mono', monospace; }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     
     @media print {
       body { background: white !important; color: black !important; overflow: visible !important; }
@@ -77,6 +79,12 @@
         <span class="hidden sm:inline">Klaim Akun</span>
       </button>
 
+      <!-- Auto Sort Birth Year Button -->
+      <button id="btn-auto-sort-birth" class="px-2.5 py-1.5 rounded-lg bg-amber-600/90 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 shadow active:scale-95 transition border border-amber-500/40" title="Solusi Salah Urutan: Urutkan Kakek, Ayah, Anak per Tahun Lahir (Tua ke Muda)">
+        <svg class="w-4 h-4 text-amber-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+        <span class="hidden sm:inline">Urutkan Thn Lahir</span>
+      </button>
+
       <!-- Print / PDF Button -->
       <button id="btn-print" class="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm active:scale-95 transition">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
@@ -90,51 +98,72 @@
   </header>
 
   <!-- ========================================================================= -->
-  <!-- 2. QUICK TOOLBAR: SHAPES, CONNECTORS & ZOOM -->
+  <!-- 2. QUICK TOOLBAR: COMPACT HORIZONTAL SCROLLABLE CHIPS (MOBILE FRIENDLY) -->
   <!-- ========================================================================= -->
-  <div class="bg-slate-900/90 border-b border-slate-800 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs z-20">
-    <!-- Skin Selector -->
-    <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
-      <span class="text-slate-400 px-1 text-[11px] font-medium">Skin:</span>
-      <button class="skin-btn px-2 py-1 rounded bg-amber-600 text-white font-bold transition flex items-center gap-1" data-skin="simple" title="Hanya Muncul Nama Saja">
-        <span class="w-1.5 h-1.5 rounded-full bg-amber-300"></span>
-        <span>Simple (Nama Saja)</span>
+  <div class="bg-slate-900/95 backdrop-blur border-b border-slate-800 px-2.5 py-1.5 flex items-center gap-2 text-xs z-20 overflow-x-auto no-scrollbar whitespace-nowrap">
+    <!-- Tombol Rapikan Otomatis (Dynamic Tree Spacing & Auto Centering) -->
+    <button id="btn-auto-layout" class="shrink-0 px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition border border-emerald-500/40" title="Rapikan Otomatis: Susun ulang silsilah dengan kalkulasi lebar sub-tree & auto-centering bebas bentrok">
+      <svg class="w-3.5 h-3.5 text-emerald-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+      <span>Rapikan Otomatis</span>
+    </button>
+
+    <!-- Jenis Garis: Mode Horizontal Chips / Pills -->
+    <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 shrink-0">
+      <span class="text-slate-400 px-1 text-[11px] font-medium flex items-center gap-1">
+        <svg class="w-3 h-3 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+        <span>Garis:</span>
+      </span>
+      <button class="line-btn px-2 py-0.5 rounded text-[11px] font-medium text-slate-300 hover:text-white transition flex items-center gap-1" data-line="orthogonal" title="Paralel Siku Bebas Nabrak (Collision-Free Corridor)">
+        <span>Siku</span>
       </button>
-      <button class="skin-btn px-2 py-1 rounded text-slate-300 hover:text-white transition" data-skin="pill" title="Kapsul Ramping">Kapsul</button>
-      <button class="skin-btn px-2 py-1 rounded text-slate-300 hover:text-white transition" data-skin="detailed" title="5 Atribut Lengkap">Lengkap</button>
+      <button class="line-btn px-2 py-0.5 rounded text-[11px] font-medium text-slate-300 hover:text-white transition flex items-center gap-1" data-line="bezier" title="Lengkung Bezier">
+        <span>Bezier</span>
+      </button>
+      <button class="line-btn px-2 py-0.5 rounded text-[11px] font-medium text-slate-300 hover:text-white transition flex items-center gap-1" data-line="linear" title="Seri Lurus Langsung">
+        <span>Lurus</span>
+      </button>
     </div>
 
-    <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+    <!-- Bentuk Node Chips -->
+    <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 shrink-0">
       <span class="text-slate-400 px-1 text-[11px] font-medium">Bentuk:</span>
-      <button class="shape-btn px-2 py-1 rounded text-slate-300 hover:text-white transition" data-shape="card">Kotak Card</button>
-      <button class="shape-btn px-2 py-1 rounded text-slate-300 hover:text-white transition" data-shape="circle">Lingkaran</button>
-      <button class="shape-btn px-2 py-1 rounded text-slate-300 hover:text-white transition" data-shape="hexagon">Hexagon</button>
+      <button class="shape-btn px-2 py-0.5 rounded text-[11px] font-medium text-slate-300 hover:text-white transition" data-shape="card">Kotak</button>
+      <button class="shape-btn px-2 py-0.5 rounded text-[11px] font-medium text-slate-300 hover:text-white transition" data-shape="circle">Bulat</button>
+      <button class="shape-btn px-2 py-0.5 rounded text-[11px] font-medium text-slate-300 hover:text-white transition" data-shape="hexagon">Hexa</button>
     </div>
 
-    <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
-      <span class="text-slate-400 px-1 text-[11px] font-medium">Garis:</span>
-      <button class="line-btn px-2 py-1 rounded text-slate-300 hover:text-white transition" data-line="orthogonal">Paralel Siku</button>
-      <button class="line-btn px-2 py-1 rounded text-slate-300 hover:text-white transition" data-line="bezier">Bezier</button>
-      <button class="line-btn px-2 py-1 rounded text-slate-300 hover:text-white transition" data-line="linear">Seri Lurus</button>
+    <!-- Skin Selector Chips -->
+    <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 shrink-0">
+      <span class="text-slate-400 px-1 text-[11px] font-medium">Skin:</span>
+      <button class="skin-btn px-2 py-0.5 rounded text-[11px] font-medium text-slate-300 hover:text-white transition" data-skin="simple" title="Hanya Muncul Nama Saja">Simple</button>
+      <button class="skin-btn px-2 py-0.5 rounded text-[11px] font-medium text-slate-300 hover:text-white transition" data-skin="pill" title="Kapsul Ramping">Kapsul</button>
+      <button class="skin-btn px-2 py-0.5 rounded text-[11px] font-medium text-slate-300 hover:text-white transition" data-skin="detailed" title="5 Atribut Lengkap">Lengkap</button>
     </div>
 
-    <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
-      <span class="text-slate-400 px-1 text-[11px] font-medium">Kanvas:</span>
+    <!-- Ukuran Kanvas Preset -->
+    <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 shrink-0">
+      <span class="text-slate-400 px-1 text-[11px] font-medium">Kertas:</span>
       <select id="select-paper-size" class="bg-slate-900 text-slate-200 border border-slate-700 rounded px-1.5 py-0.5 text-xs">
-        <option value="autofit">Auto-Fit Responsif</option>
-        <option value="A0">A0 Poster (841 x 1189 mm)</option>
-        <option value="A1">A1 (594 x 841 mm)</option>
-        <option value="A2">A2 (420 x 594 mm)</option>
-        <option value="A3">A3 (297 x 420 mm)</option>
-        <option value="A4">A4 (210 x 297 mm)</option>
+        <option value="autofit">Auto-Fit</option>
+        <option value="A0">A0</option>
+        <option value="A1">A1</option>
+        <option value="A2">A2</option>
+        <option value="A3">A3</option>
+        <option value="A4">A4</option>
       </select>
     </div>
 
-    <div class="flex items-center gap-1">
+    <!-- Auto Sort Birth Year -->
+    <button id="btn-auto-sort-birth" class="shrink-0 px-2 py-1 rounded-lg bg-amber-600/90 hover:bg-amber-500 text-white text-[11px] font-bold flex items-center gap-1 shadow-xs active:scale-95 transition border border-amber-500/40" title="Urutkan Kakek, Ayah, Anak per Tahun Lahir">
+      <span>⚡ Urut Thn Lahir</span>
+    </button>
+
+    <!-- Canvas Zoom Controls -->
+    <div class="flex items-center gap-1 shrink-0 ml-auto">
       <button id="btn-zoom-out" class="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200" title="Zoom Out">
         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
       </button>
-      <span id="label-zoom" class="text-[11px] font-mono-num w-11 text-center text-slate-300">95%</span>
+      <span id="label-zoom" class="text-[11px] font-mono-num w-10 text-center text-slate-300">95%</span>
       <button id="btn-zoom-in" class="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200" title="Zoom In">
         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
       </button>
@@ -162,9 +191,15 @@
         <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
           <feDropShadow dx="0" dy="4" stdDeviation="4" flood-opacity="0.35" flood-color="#000000" />
         </filter>
+        <!-- Dynamic Infinite Coordinate Grid Matrix (40px cells) -->
+        <pattern id="matrix-subgrid" width="40" height="40" patternUnits="userSpaceOnUse">
+          <circle cx="20" cy="20" r="0.75" fill="#334155" opacity="0.4" />
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5" stroke-opacity="0.3" />
+        </pattern>
       </defs>
       
       <g id="scene-group" transform="translate(40, 40) scale(0.95)">
+        <rect id="layer-infinite-grid" x="-4000" y="-4000" width="16000" height="16000" fill="url(#matrix-subgrid)" pointer-events="none"></rect>
         <g id="layer-paper-bounds"></g>
         <g id="layer-grid-guides"></g>
         <g id="layer-snap-target"></g>
@@ -391,6 +426,71 @@
     </div>
   </div>
 
+  <!-- ========================================================================= -->
+  <!-- 8. MODAL: KELOLA & KOREKSI URUTAN ANGGOTA (ANAK / AYAH / KAKEK) -->
+  <!-- ========================================================================= -->
+  <div id="modal-node-detail" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl text-slate-100">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center gap-2">
+          <span class="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 font-bold text-xs" id="detail-node-code">1.1</span>
+          <div>
+            <h3 class="font-bold text-white text-base" id="detail-node-name">Nama Anggota</h3>
+            <p class="text-xs text-slate-400" id="detail-node-role">Generasi 2 • Kolom 1</p>
+          </div>
+        </div>
+        <button id="btn-close-detail" class="text-slate-400 hover:text-white p-1">✕</button>
+      </div>
+
+      <!-- Kotak Solusi Salah Urutan Silsilah -->
+      <div class="bg-slate-950 p-3 rounded-xl border border-amber-500/40 space-y-2">
+        <div class="flex items-center justify-between">
+          <div class="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+            <span>⇄</span>
+            <span>Koreksi Urutan Silsilah / Saudara:</span>
+          </div>
+          <span class="text-[10px] text-slate-400 font-mono" id="detail-node-parent-info">-</span>
+        </div>
+        <p class="text-[11px] text-slate-400 leading-tight">
+          Tukar nomor urut & posisi dengan saudara kandung sebelah jika urutan anak/ayah keliru:
+        </p>
+        <div class="grid grid-cols-2 gap-2 pt-1">
+          <button id="btn-swap-prev" class="px-2.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-bold flex items-center justify-center gap-1 border border-slate-700 transition active:scale-95">
+            <span>◀ Lebih Tua</span>
+          </button>
+          <button id="btn-swap-next" class="px-2.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-bold flex items-center justify-center gap-1 border border-slate-700 transition active:scale-95">
+            <span>Lebih Muda ▶</span>
+          </button>
+        </div>
+
+        <button id="btn-sort-my-children" class="w-full py-2 px-3 bg-amber-950/60 hover:bg-amber-900 border border-amber-600/50 text-amber-200 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95">
+          <span>⚡ Urutkan Anak-Anak per Tahun Lahir</span>
+        </button>
+      </div>
+
+      <!-- Informasi Atribut Anggota -->
+      <div class="space-y-2 text-xs bg-slate-950/50 p-3 rounded-xl border border-slate-800">
+        <div class="flex justify-between py-1 border-b border-slate-900">
+          <span class="text-slate-400">Tahun Lahir/Wafat:</span>
+          <span class="font-medium text-slate-200" id="detail-node-birthdeath">-</span>
+        </div>
+        <div class="flex justify-between py-1 border-b border-slate-900">
+          <span class="text-slate-400">Kota / Domisili:</span>
+          <span class="font-medium text-slate-200" id="detail-node-domicile">-</span>
+        </div>
+        <div class="flex justify-between py-1">
+          <span class="text-slate-400">Status Akun:</span>
+          <span class="font-medium text-amber-400" id="detail-node-claim">-</span>
+        </div>
+      </div>
+
+      <div class="flex gap-2 pt-2 border-t border-slate-800">
+        <button id="btn-claim-this-node" class="flex-1 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs">⭐ Klaim Akun</button>
+        <button id="btn-delete-node" class="py-2 px-3 rounded-xl bg-red-950/60 hover:bg-red-900 border border-red-700/60 text-red-300 font-semibold text-xs">Hapus</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="fixed bottom-6 right-6 bg-emerald-600 text-white px-4 py-2.5 rounded-xl shadow-2xl text-xs font-semibold transform translate-y-20 opacity-0 transition-all duration-300 z-50">
     <span id="toast-text">Notifikasi</span>
   </div>
@@ -521,9 +621,12 @@
 
       const maxRow = nodes.length > 0 ? Math.max(...nodes.map(n => n.row), 3) : 3;
       const maxCol = nodes.length > 0 ? Math.max(...nodes.map(n => n.col), 4) : 4;
+      // Dynamic Infinite Grid Matrix (Auto-Expanding)
+      const gridTotalRows = Math.max(maxRow + 4, 8);
+      const gridTotalCols = Math.max(maxCol + 6, 12);
 
       document.getElementById('stat-total-nodes').textContent = `${nodes.length} Anggota`;
-      document.getElementById('stat-grid-size').textContent = `${maxRow + 1} Gen • ${maxCol + 1} Kol`;
+      document.getElementById('stat-grid-size').textContent = `${maxRow + 1} Gen • ${maxCol + 1} Kol (Infinite Grid)`;
 
       // Update Claim Banner
       const claimBanner = document.getElementById('claim-banner');
@@ -535,14 +638,14 @@
         claimBanner.classList.add('hidden');
       }
 
-      // Guides
+      // Dynamic Infinite Matrix Grid Guides
       let guidesHtml = '';
-      for (let r = 0; r <= maxRow + 2; r++) {
+      for (let r = 0; r <= gridTotalRows; r++) {
         const y = GRID_START_Y + r * CELL_HEIGHT;
         guidesHtml += `<text x="${GRID_START_X - 16}" y="${y + CELL_HEIGHT/2 + 4}" text-anchor="end" fill="#64748b" font-size="11" font-weight="bold" font-family="monospace">GEN ${r + 1}</text>`;
-        guidesHtml += `<line x1="${GRID_START_X - 10}" y1="${y}" x2="${GRID_START_X + (maxCol + 2) * CELL_WIDTH}" y2="${y}" stroke="#1e293b" stroke-width="1" stroke-dasharray="3 3"/>`;
+        guidesHtml += `<line x1="${GRID_START_X - 10}" y1="${y}" x2="${GRID_START_X + (gridTotalCols + 1) * CELL_WIDTH}" y2="${y}" stroke="#1e293b" stroke-width="1" stroke-dasharray="3 3"/>`;
       }
-      for (let c = 0; c <= maxCol + 2; c++) {
+      for (let c = 0; c <= gridTotalCols; c++) {
         const x = GRID_START_X + c * CELL_WIDTH;
         guidesHtml += `<text x="${x + CELL_WIDTH/2}" y="${GRID_START_Y - 14}" text-anchor="middle" fill="#475569" font-size="10" font-family="monospace">KOL ${c + 1}</text>`;
       }
@@ -558,7 +661,7 @@
         layerSnap.innerHTML = '';
       }
 
-      // Connectors with Lineage Path Highlighting
+      // Connectors with Real-Time Drag Tracking & Collision-Free Corridor Routing
       const claimedPath = getClaimedLineageIds();
       let connectorsHtml = '';
       nodes.forEach(child => {
@@ -566,8 +669,9 @@
         const parent = nodes.find(n => n.id === child.parentId);
         if (!parent) return;
 
-        const pPos = getNodePosition(parent.row, parent.col);
-        const cPos = getNodePosition(child.row, child.col);
+        // Dynamic Real-time coordinates during drag
+        const pPos = (parent.id === draggingNodeId && dragCurrentPos) ? dragCurrentPos : getNodePosition(parent.row, parent.col);
+        const cPos = (child.id === draggingNodeId && dragCurrentPos) ? dragCurrentPos : getNodePosition(child.row, child.col);
         const pCenterX = pPos.x + CELL_WIDTH / 2;
         const cCenterX = cPos.x + CELL_WIDTH / 2;
 
@@ -604,8 +708,33 @@
           connectorsHtml += `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="${strokeW}" stroke-linecap="round"/>`;
           connectorsHtml += `<circle cx="${cCenterX}" cy="${cTopY}" r="${isLineage ? 5 : 3.5}" fill="${stroke}"/>`;
         } else {
-          const midY = (pBottomY + cTopY) / 2;
-          const d = `M ${pCenterX} ${pBottomY} L ${pCenterX} ${midY} L ${cCenterX} ${midY} L ${cCenterX} ${cTopY}`;
+          // ORTHOGONAL ROUTING: COLLISION-FREE CORRIDOR LOGIC
+          let d = '';
+          if (child.row === parent.row + 1) {
+            // Standard consecutive generation: Corridor between rows is 100% collision-free
+            const midY = (pBottomY + cTopY) / 2;
+            d = `M ${pCenterX} ${pBottomY} L ${pCenterX} ${midY} L ${cCenterX} ${midY} L ${cCenterX} ${cTopY}`;
+          } else if (child.row > parent.row + 1) {
+            // Non-adjacent / skipped generation: Route along safe inter-row corridor and vertical gutters
+            const gapExitY = pPos.y + CELL_HEIGHT - 6;
+            const gapEnterY = cPos.y + 6;
+            const hasIntervening = nodes.some(n =>
+              n.id !== parent.id && n.id !== child.id &&
+              n.col === child.col && n.row > parent.row && n.row < child.row
+            );
+
+            if (!hasIntervening) {
+              d = `M ${pCenterX} ${pBottomY} L ${pCenterX} ${gapExitY} L ${cCenterX} ${gapExitY} L ${cCenterX} ${cTopY}`;
+            } else {
+              const gutterCol = Math.max(parent.col, child.col) + 1;
+              const gutterX = GRID_START_X + gutterCol * CELL_WIDTH - 12;
+              d = `M ${pCenterX} ${pBottomY} L ${pCenterX} ${gapExitY} L ${gutterX} ${gapExitY} L ${gutterX} ${gapEnterY} L ${cCenterX} ${gapEnterY} L ${cCenterX} ${cTopY}`;
+            }
+          } else {
+            // Same row or higher row: loop around card boundary cleanly
+            const sideX = Math.max(pCenterX, cCenterX) + CELL_WIDTH / 2 + 12;
+            d = `M ${pCenterX} ${pBottomY} L ${pCenterX} ${pBottomY + 16} L ${sideX} ${pBottomY + 16} L ${sideX} ${cTopY - 16} L ${cCenterX} ${cTopY - 16} L ${cCenterX} ${cTopY}`;
+          }
           connectorsHtml += `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="${strokeW}" stroke-linecap="round" stroke-linejoin="round"/>`;
           connectorsHtml += `<circle cx="${cCenterX}" cy="${cTopY}" r="${isLineage ? 5 : 3.5}" fill="${stroke}"/>`;
         }
@@ -767,9 +896,244 @@
       layerNodes.innerHTML = nodesHtml;
     }
 
-    // Drag & Pan listeners
+    // Reorder & Birth Year Sorter Functions (Solusi Salah Urutan Anak / Ayah / Kakek)
+    function extractBirthYear(str) {
+      if (!str) return 9999;
+      const match = str.match(/\b(18\d{2}|19\d{2}|20\d{2})\b/);
+      return match ? parseInt(match[1], 10) : 9999;
+    }
+
+    function swapSiblingOrder(nodeId, direction) {
+      const node = nodes.find(n => n.id === nodeId);
+      if (!node) return;
+      const siblings = nodes
+        .filter(n => n.parentId === node.parentId)
+        .sort((a, b) => a.col - b.col);
+      const idx = siblings.findIndex(n => n.id === nodeId);
+      if (idx === -1) return;
+
+      const targetIdx = direction === 'prev' ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= siblings.length) {
+        showToast(direction === 'prev' ? 'Sudah berada di urutan paling tua (kiri)' : 'Sudah berada di urutan paling muda (kanan)');
+        return;
+      }
+
+      const sibling = siblings[targetIdx];
+      const tempCol = node.col;
+      node.col = sibling.col;
+      sibling.col = tempCol;
+
+      nodes = recomputeDotNotation(nodes);
+      saveNodes();
+      renderCanvas();
+      openNodeDetailModal(node.id);
+      showToast(`Urutan berhasil ditukar: ${node.name} ⇄ ${sibling.name}`);
+    }
+
+    function sortChildrenByBirthYear(parentId) {
+      const children = nodes.filter(n => n.parentId === parentId);
+      if (children.length < 2) {
+        showToast('Memerlukan minimal 2 anak untuk diurutkan');
+        return;
+      }
+
+      const sorted = [...children].sort((a, b) => {
+        const yA = extractBirthYear(a.birthDeath);
+        const yB = extractBirthYear(b.birthDeath);
+        return yA - yB;
+      });
+
+      const cols = children.map(c => c.col).sort((a, b) => a - b);
+      sorted.forEach((child, i) => {
+        const orig = nodes.find(n => n.id === child.id);
+        if (orig) orig.col = cols[i];
+      });
+
+      nodes = recomputeDotNotation(nodes);
+      saveNodes();
+      renderCanvas();
+      if (activeSelectedNodeId) openNodeDetailModal(activeSelectedNodeId);
+      showToast(`⚡ Urutan ${children.length} anak berhasil diurutkan berdasarkan tahun lahir!`);
+    }
+
+    function sortAllTreeByBirthYear() {
+      const parentIds = Array.from(new Set(nodes.map(n => n.parentId)));
+      let countSorted = 0;
+
+      parentIds.forEach(pId => {
+        const siblings = nodes.filter(n => n.parentId === pId);
+        if (siblings.length >= 2) {
+          const sorted = [...siblings].sort((a, b) => {
+            const yA = extractBirthYear(a.birthDeath);
+            const yB = extractBirthYear(b.birthDeath);
+            return yA - yB;
+          });
+          const cols = siblings.map(s => s.col).sort((a, b) => a - b);
+          sorted.forEach((s, idx) => {
+            const target = nodes.find(n => n.id === s.id);
+            if (target) target.col = cols[idx];
+          });
+          countSorted++;
+        }
+      });
+
+      nodes = recomputeDotNotation(nodes);
+      saveNodes();
+      renderCanvas();
+      if (activeSelectedNodeId) openNodeDetailModal(activeSelectedNodeId);
+      showToast(`⚡ Selesai! Seluruh generasi (Kakek, Ayah, Anak) telah diurutkan berdasarkan tahun lahir.`);
+    }
+
+    // Dynamic Tree Spacing & Auto Centering (Rapikan Otomatis)
+    function autoLayoutTree() {
+      if (!nodes || nodes.length === 0) return;
+
+      // 1. Identify roots
+      const rootNodes = nodes.filter(n => !n.parentId || !nodes.some(p => p.id === n.parentId));
+      rootNodes.sort((a, b) => {
+        if (a.row !== b.row) return a.row - b.row;
+        return a.col - b.col;
+      });
+
+      function getChildren(nodeId) {
+        return nodes
+          .filter(n => n.parentId === nodeId)
+          .sort((a, b) => {
+            if (a.birthOrder !== undefined && b.birthOrder !== undefined) return a.birthOrder - b.birthOrder;
+            const yA = extractBirthYear(a.birthDeath);
+            const yB = extractBirthYear(b.birthDeath);
+            if (yA !== 9999 && yB !== 9999 && yA !== yB) return yA - yB;
+            return a.col - b.col;
+          });
+      }
+
+      // 2. Compute subtree span
+      const subtreeWidths = new Map();
+      function computeSubtreeWidth(nodeId) {
+        const children = getChildren(nodeId);
+        if (children.length === 0) {
+          subtreeWidths.set(nodeId, 1);
+          return 1;
+        }
+        let sumW = 0;
+        children.forEach(c => {
+          sumW += computeSubtreeWidth(c.id);
+        });
+        const finalW = Math.max(sumW, 1);
+        subtreeWidths.set(nodeId, finalW);
+        return finalW;
+      }
+      rootNodes.forEach(r => computeSubtreeWidth(r.id));
+
+      // 3. Assign row & col with Auto-Centering and Zero-Collision
+      const assignedPos = new Map();
+      const occupied = new Set();
+
+      function isCellTaken(r, c) {
+        return occupied.has(`${r},${c}`);
+      }
+
+      function takeCell(r, c) {
+        occupied.add(`${r},${c}`);
+      }
+
+      let currentRootStartCol = 1;
+
+      function layoutNode(nodeId, currentRow, startCol) {
+        const children = getChildren(nodeId);
+
+        if (children.length === 0) {
+          let col = startCol;
+          while (isCellTaken(currentRow, col)) {
+            col++;
+          }
+          assignedPos.set(nodeId, { row: currentRow, col });
+          takeCell(currentRow, col);
+          return col + 1;
+        }
+
+        // Layout all children subtrees side-by-side
+        let childCursorCol = startCol;
+        const placedChildCols = [];
+
+        children.forEach(child => {
+          const nextStart = layoutNode(child.id, currentRow + 1, childCursorCol);
+          const childPos = assignedPos.get(child.id);
+          if (childPos) placedChildCols.push(childPos.col);
+          childCursorCol = Math.max(nextStart, childPos ? childPos.col + 1 : childCursorCol);
+        });
+
+        // Auto-Centering: Center parent directly above the midpoint of children
+        const minC = Math.min(...placedChildCols);
+        const maxC = Math.max(...placedChildCols);
+        let centerCol = Math.round((minC + maxC) / 2);
+
+        while (isCellTaken(currentRow, centerCol)) {
+          centerCol++;
+        }
+
+        assignedPos.set(nodeId, { row: currentRow, col: centerCol });
+        takeCell(currentRow, centerCol);
+
+        return Math.max(childCursorCol, centerCol + 1);
+      }
+
+      rootNodes.forEach(root => {
+        currentRootStartCol = layoutNode(root.id, 0, currentRootStartCol) + 1;
+      });
+
+      // Update node positions
+      nodes.forEach(n => {
+        const p = assignedPos.get(n.id);
+        if (p) {
+          n.row = p.row;
+          n.col = p.col;
+        }
+      });
+
+      nodes = recomputeDotNotation(nodes);
+      saveNodes();
+      renderCanvas();
+      showToast('✨ Pohon silsilah berhasil dirapikan otomatis & seimbang (Auto-Centering)!');
+    }
+
+    // Modal Detail & Koreksi Urutan Logic
+    let activeSelectedNodeId = null;
+    const modalDetail = document.getElementById('modal-node-detail');
+
+    function openNodeDetailModal(nodeId) {
+      activeSelectedNodeId = nodeId;
+      const node = nodes.find(n => n.id === nodeId);
+      if (!node) return;
+
+      document.getElementById('detail-node-code').textContent = node.dotNotation;
+      document.getElementById('detail-node-name').textContent = `${node.honorific || ''} ${node.name}`;
+      document.getElementById('detail-node-role').textContent = `Generasi ${node.row + 1} • Kolom ${node.col + 1}`;
+      document.getElementById('detail-node-birthdeath').textContent = node.birthDeath || 'Tahun Lahir - Wafat';
+      document.getElementById('detail-node-domicile').textContent = node.domicile || 'Domisili';
+      document.getElementById('detail-node-claim').textContent = node.claimedBy ? `★ Diklaim: ${node.claimedBy}` : 'Belum Diklaim';
+
+      const parent = node.parentId ? nodes.find(n => n.id === node.parentId) : null;
+      document.getElementById('detail-node-parent-info').textContent = parent ? `Anak dari: ${parent.name}` : 'Garis Puncak (Generasi 1)';
+
+      const hasChildren = nodes.some(n => n.parentId === node.id);
+      const btnSortKids = document.getElementById('btn-sort-my-children');
+      if (hasChildren) {
+        btnSortKids.classList.remove('hidden');
+      } else {
+        btnSortKids.classList.add('hidden');
+      }
+
+      modalDetail.classList.remove('hidden');
+    }
+
+    // Drag & Pan listeners with Click Detection
     const canvasWrapper = document.getElementById('canvas-wrapper');
     const svgCanvas = document.getElementById('svg-canvas');
+
+    let clickStartX = 0;
+    let clickStartY = 0;
+    let clickCandidateNodeId = null;
 
     function getSvgCoordinates(clientX, clientY) {
       const rect = svgCanvas.getBoundingClientRect();
@@ -780,11 +1144,16 @@
     }
 
     canvasWrapper.addEventListener('mousedown', (e) => {
+      clickStartX = e.clientX;
+      clickStartY = e.clientY;
+      clickCandidateNodeId = null;
+
       const nodeG = e.target.closest('[data-node-id]');
       if (nodeG) {
         const id = nodeG.getAttribute('data-node-id');
         const node = nodes.find(n => n.id === id);
         if (node) {
+          clickCandidateNodeId = id;
           draggingNodeId = id;
           const pos = getNodePosition(node.row, node.col);
           const pt = getSvgCoordinates(e.clientX, e.clientY);
@@ -813,10 +1182,84 @@
       }
     });
 
-    window.addEventListener('mouseup', () => {
-      if (draggingNodeId && hoverCell) {
+    window.addEventListener('mouseup', (e) => {
+      const moveDistance = Math.hypot(e.clientX - clickStartX, e.clientY - clickStartY);
+
+      if (clickCandidateNodeId && moveDistance < 6) {
+        // Pure click: Open detail & reorder modal!
+        openNodeDetailModal(clickCandidateNodeId);
+      } else if (draggingNodeId && hoverCell) {
         finishDrag(draggingNodeId, hoverCell.row, hoverCell.col);
       }
+
+      clickCandidateNodeId = null;
+      draggingNodeId = null;
+      isPanning = false;
+      hoverCell = null;
+      renderCanvas();
+    });
+
+    // Mobile Touch Event Listeners (Fluid Touch Drag & Pan on Smartphones)
+    canvasWrapper.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        const touch = e.touches[0];
+        clickStartX = touch.clientX;
+        clickStartY = touch.clientY;
+        clickCandidateNodeId = null;
+
+        const nodeG = touch.target.closest ? touch.target.closest('[data-node-id]') : null;
+        if (nodeG) {
+          const id = nodeG.getAttribute('data-node-id');
+          const node = nodes.find(n => n.id === id);
+          if (node) {
+            clickCandidateNodeId = id;
+            draggingNodeId = id;
+            const pos = getNodePosition(node.row, node.col);
+            const pt = getSvgCoordinates(touch.clientX, touch.clientY);
+            dragOffset = { x: pt.x - pos.x, y: pt.y - pos.y };
+            dragCurrentPos = { x: pos.x, y: pos.y };
+            hoverCell = { row: node.row, col: node.col };
+            renderCanvas();
+          }
+        } else {
+          isPanning = true;
+          panStart = { x: touch.clientX - pan.x, y: touch.clientY - pan.y };
+        }
+      }
+    }, { passive: false });
+
+    window.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 1) {
+        const touch = e.touches[0];
+        if (draggingNodeId) {
+          if (e.cancelable) e.preventDefault();
+          const pt = getSvgCoordinates(touch.clientX, touch.clientY);
+          const newX = pt.x - dragOffset.x;
+          const newY = pt.y - dragOffset.y;
+          dragCurrentPos = { x: newX, y: newY };
+          hoverCell = pixelToGrid(newX + CELL_WIDTH / 2, newY + CELL_HEIGHT / 2);
+          renderCanvas();
+        } else if (isPanning) {
+          if (e.cancelable) e.preventDefault();
+          pan = { x: touch.clientX - panStart.x, y: touch.clientY - panStart.y };
+          renderCanvas();
+        }
+      }
+    }, { passive: false });
+
+    window.addEventListener('touchend', (e) => {
+      if (clickCandidateNodeId && draggingNodeId) {
+        const touch = e.changedTouches[0];
+        const moveDist = Math.hypot(touch.clientX - clickStartX, touch.clientY - clickStartY);
+        if (moveDist < 8) {
+          openNodeDetailModal(clickCandidateNodeId);
+        } else if (hoverCell) {
+          finishDrag(draggingNodeId, hoverCell.row, hoverCell.col);
+        }
+      } else if (draggingNodeId && hoverCell) {
+        finishDrag(draggingNodeId, hoverCell.row, hoverCell.col);
+      }
+      clickCandidateNodeId = null;
       draggingNodeId = null;
       isPanning = false;
       hoverCell = null;
@@ -1097,6 +1540,54 @@
       a.click();
       URL.revokeObjectURL(url);
       showToast('Bagan SVG diunduh!');
+    });
+
+    // Tombol Rapikan Otomatis (Dynamic Tree Spacing & Auto Centering)
+    const btnAutoLayout = document.getElementById('btn-auto-layout');
+    if (btnAutoLayout) {
+      btnAutoLayout.addEventListener('click', autoLayoutTree);
+    }
+
+    // Auto-Sort Tree by Birth Year Button
+    const btnAutoSort = document.getElementById('btn-auto-sort-birth');
+    if (btnAutoSort) {
+      btnAutoSort.addEventListener('click', sortAllTreeByBirthYear);
+    }
+
+    // Modal Node Detail Actions
+    document.getElementById('btn-close-detail').addEventListener('click', () => modalDetail.classList.add('hidden'));
+    document.getElementById('btn-swap-prev').addEventListener('click', () => {
+      if (activeSelectedNodeId) swapSiblingOrder(activeSelectedNodeId, 'prev');
+    });
+    document.getElementById('btn-swap-next').addEventListener('click', () => {
+      if (activeSelectedNodeId) swapSiblingOrder(activeSelectedNodeId, 'next');
+    });
+    document.getElementById('btn-sort-my-children').addEventListener('click', () => {
+      if (activeSelectedNodeId) sortChildrenByBirthYear(activeSelectedNodeId);
+    });
+    document.getElementById('btn-claim-this-node').addEventListener('click', () => {
+      if (!activeSelectedNodeId) return;
+      claimedNodeId = activeSelectedNodeId;
+      const n = nodes.find(item => item.id === activeSelectedNodeId);
+      if (n) {
+        n.claimedBy = claimedUserName;
+        nodes.forEach(other => { if (other.id !== n.id) other.claimedBy = undefined; });
+        saveNodes();
+        renderCanvas();
+        openNodeDetailModal(n.id);
+        showToast(`⭐ Posisi ${n.name} diklaim sebagai akun Anda!`);
+      }
+    });
+    document.getElementById('btn-delete-node').addEventListener('click', () => {
+      if (!activeSelectedNodeId) return;
+      const n = nodes.find(item => item.id === activeSelectedNodeId);
+      if (!confirm(`Hapus anggota ${n ? n.name : ''}?`)) return;
+      nodes = nodes.filter(item => item.id !== activeSelectedNodeId);
+      nodes = recomputeDotNotation(nodes);
+      saveNodes();
+      modalDetail.classList.add('hidden');
+      renderCanvas();
+      showToast('Anggota berhasil dihapus');
     });
 
     updateButtons();

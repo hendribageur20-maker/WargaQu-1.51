@@ -34,7 +34,13 @@ import {
   UserCheck,
   UserPlus,
   Compass,
-  ArrowUpCircle
+  ArrowUpCircle,
+  Zap,
+  ChevronLeft,
+  ChevronRight,
+  ArrowLeftRight,
+  LayoutGrid,
+  Minus
 } from 'lucide-react';
 import { FamilyMember } from './LeluhurQuView';
 
@@ -72,6 +78,7 @@ export interface GridNode {
   color?: string; // emerald, blue, purple, amber, rose
   notes?: string;
   claimedBy?: string; // Nama / email akun yang mengklaim
+  birthOrder?: number; // Nomor urut kelahiran (anak ke-1, 2, 3...)
 }
 
 interface GridCanvasEngineProps {
@@ -473,6 +480,232 @@ export const GridCanvasEngine: React.FC<GridCanvasEngineProps> = ({
     });
 
     return updated;
+  };
+
+  // Helper ekstrak tahun dari string birthDeath (misal "1945 - 2015" -> 1945)
+  const extractBirthYear = (str?: string): number => {
+    if (!str) return 9999;
+    const match = str.match(/\d{4}/);
+    return match ? parseInt(match[0], 10) : 9999;
+  };
+
+  // Urutkan anak-anak dari node tertentu berdasarkan tahun lahir
+  const handleSortChildrenByBirthYear = (parentNodeId: string) => {
+    const children = nodes.filter((n) => n.parentId === parentNodeId);
+    if (children.length <= 1) {
+      showNotification('Jumlah anak kurang dari 2, tidak perlu diurutkan.');
+      return;
+    }
+
+    const sorted = [...children].sort((a, b) => {
+      const yA = extractBirthYear(a.birthDeath);
+      const yB = extractBirthYear(b.birthDeath);
+      if (yA !== yB) return yA - yB;
+      return a.col - b.col;
+    });
+
+    const minCol = Math.min(...children.map((c) => c.col));
+    const updated = nodes.map((n) => {
+      const idx = sorted.findIndex((s) => s.id === n.id);
+      if (idx !== -1) {
+        return {
+          ...n,
+          col: minCol + idx,
+        };
+      }
+      return n;
+    });
+
+    const renumbered = recomputeDotNotation(updated);
+    setNodes(renumbered);
+    showNotification(`Urutan ${children.length} anak berhasil dirapikan per tahun lahir!`);
+  };
+
+  // Tukar Urutan Saudara (Geser Lebih Tua / Lebih Muda)
+  const handleSwapSiblingOrder = (nodeId: string, direction: 'prev' | 'next') => {
+    const current = nodes.find((n) => n.id === nodeId);
+    if (!current || !current.parentId) {
+      showNotification('Hanya anggota yang memiliki orang tua / saudara yang dapat ditukar urutannya.');
+      return;
+    }
+
+    const siblings = nodes
+      .filter((n) => n.parentId === current.parentId)
+      .sort((a, b) => a.col - b.col);
+
+    const curIndex = siblings.findIndex((s) => s.id === nodeId);
+    if (curIndex === -1) return;
+
+    const targetIndex = direction === 'prev' ? curIndex - 1 : curIndex + 1;
+    if (targetIndex < 0 || targetIndex >= siblings.length) {
+      showNotification(direction === 'prev' ? 'Sudah berada di urutan paling kiri (tertua)!' : 'Sudah berada di urutan paling kanan (termuda)!');
+      return;
+    }
+
+    const neighbor = siblings[targetIndex];
+    const tempCol = current.col;
+    const neighborCol = neighbor.col;
+
+    const updated = nodes.map((n) => {
+      if (n.id === current.id) return { ...n, col: neighborCol };
+      if (n.id === neighbor.id) return { ...n, col: tempCol };
+      return n;
+    });
+
+    const renumbered = recomputeDotNotation(updated);
+    setNodes(renumbered);
+    showNotification(`Urutan ${current.name} berhasil ditukar dengan ${neighbor.name}!`);
+  };
+
+  // Koreksi & Urutkan Seluruh Pohon Silsilah Otomatis Sesuai Tahun Lahir
+  const handleSortAllTreeByBirthYear = () => {
+    if (nodes.length === 0) return;
+
+    const parentIds = Array.from(new Set(nodes.filter((n) => n.parentId).map((n) => n.parentId!)));
+    if (parentIds.length === 0) {
+      showNotification('Belum ada data relasi orang tua dalam silsilah.');
+      return;
+    }
+
+    let updated = [...nodes];
+
+    parentIds.forEach((pId) => {
+      const children = updated.filter((n) => n.parentId === pId);
+      if (children.length > 1) {
+        const sorted = [...children].sort((a, b) => {
+          const yA = extractBirthYear(a.birthDeath);
+          const yB = extractBirthYear(b.birthDeath);
+          if (yA !== yB) return yA - yB;
+          return a.col - b.col;
+        });
+
+        const minCol = Math.min(...children.map((c) => c.col));
+        sorted.forEach((ch, idx) => {
+          const mIdx = updated.findIndex((u) => u.id === ch.id);
+          if (mIdx !== -1) {
+            updated[mIdx] = {
+              ...updated[mIdx],
+              col: minCol + idx,
+            };
+          }
+        });
+      }
+    });
+
+    const renumbered = recomputeDotNotation(updated);
+    setNodes(renumbered);
+    showNotification('Seluruh urutan silsilah (Kakek, Ayah, Anak, Cucu) berhasil dirapikan per tahun lahir!');
+  };
+
+  // Dynamic Tree Spacing & Auto Centering (Rapikan Otomatis)
+  const handleAutoLayoutTree = () => {
+    if (nodes.length === 0) return;
+
+    // 1. Identify root nodes
+    const rootNodes = nodes.filter((n) => !n.parentId || !nodes.some((p) => p.id === n.parentId));
+    rootNodes.sort((a, b) => {
+      if (a.row !== b.row) return a.row - b.row;
+      return a.col - b.col;
+    });
+
+    const getChildren = (nodeId: string) => {
+      return nodes
+        .filter((n) => n.parentId === nodeId)
+        .sort((a, b) => {
+          if (a.birthOrder !== undefined && b.birthOrder !== undefined) {
+            return a.birthOrder - b.birthOrder;
+          }
+          const yA = extractBirthYear(a.birthDeath);
+          const yB = extractBirthYear(b.birthDeath);
+          if (yA !== 9999 && yB !== 9999 && yA !== yB) return yA - yB;
+          return a.col - b.col;
+        });
+    };
+
+    // 2. Subtree width calculation
+    const subtreeWidths = new Map<string, number>();
+    const computeSubtreeWidth = (nodeId: string): number => {
+      const children = getChildren(nodeId);
+      if (children.length === 0) {
+        subtreeWidths.set(nodeId, 1);
+        return 1;
+      }
+      let sumW = 0;
+      children.forEach((c) => {
+        sumW += computeSubtreeWidth(c.id);
+      });
+      const node = nodes.find((n) => n.id === nodeId);
+      const minW = node && node.spouses && node.spouses.length > 1 ? 2 : 1;
+      const finalW = Math.max(sumW, minW);
+      subtreeWidths.set(nodeId, finalW);
+      return finalW;
+    };
+    rootNodes.forEach((r) => computeSubtreeWidth(r.id));
+
+    // 3. Coordinate Assignment with Auto Centering & Zero Collision
+    const assignedPos = new Map<string, { row: number; col: number }>();
+    const occupied = new Set<string>();
+
+    const isCellTaken = (r: number, c: number) => occupied.has(`${r},${c}`);
+    const takeCell = (r: number, c: number) => occupied.add(`${r},${c}`);
+
+    let currentRootStartCol = 1;
+
+    const layoutSubtree = (nodeId: string, currentRow: number, startCol: number): number => {
+      const children = getChildren(nodeId);
+
+      if (children.length === 0) {
+        let col = startCol;
+        while (isCellTaken(currentRow, col)) {
+          col++;
+        }
+        assignedPos.set(nodeId, { row: currentRow, col });
+        takeCell(currentRow, col);
+        return col + 1;
+      }
+
+      // Layout all children subtrees side-by-side
+      let childCursorCol = startCol;
+      const placedChildCols: number[] = [];
+
+      children.forEach((child) => {
+        const nextStart = layoutSubtree(child.id, currentRow + 1, childCursorCol);
+        const childPos = assignedPos.get(child.id);
+        if (childPos) placedChildCols.push(childPos.col);
+        childCursorCol = Math.max(nextStart, childPos ? childPos.col + 1 : childCursorCol);
+      });
+
+      // Auto Centering: Center parent directly above the midpoint of its children
+      const minC = Math.min(...placedChildCols);
+      const maxC = Math.max(...placedChildCols);
+      let centerCol = Math.round((minC + maxC) / 2);
+
+      while (isCellTaken(currentRow, centerCol)) {
+        centerCol++;
+      }
+
+      assignedPos.set(nodeId, { row: currentRow, col: centerCol });
+      takeCell(currentRow, centerCol);
+
+      return Math.max(childCursorCol, centerCol + 1);
+    };
+
+    rootNodes.forEach((root) => {
+      currentRootStartCol = layoutSubtree(root.id, 0, currentRootStartCol) + 1;
+    });
+
+    // Apply new positions
+    const updated = nodes.map((n) => {
+      const p = assignedPos.get(n.id);
+      if (p) {
+        return { ...n, row: p.row, col: p.col };
+      }
+      return n;
+    });
+
+    const renumbered = recomputeDotNotation(updated);
+    setNodes(renumbered);
+    showNotification('✨ Seluruh bagan silsilah berhasil dirapikan otomatis & seimbang (Auto-Centering)!');
   };
 
   // Photo Compress Helper for Lightweight Base64 Offline Storage
@@ -1018,8 +1251,15 @@ export const GridCanvasEngine: React.FC<GridCanvasEngineProps> = ({
 
   // Generate Connector Path
   const renderConnector = (parent: GridNode, child: GridNode) => {
-    const pPos = getNodePosition(parent.row, parent.col);
-    const cPos = getNodePosition(child.row, child.col);
+    // Dynamic Real-time coordinates during drag
+    const pPos =
+      parent.id === draggingNodeId && dragCurrentPos
+        ? dragCurrentPos
+        : getNodePosition(parent.row, parent.col);
+    const cPos =
+      child.id === draggingNodeId && dragCurrentPos
+        ? dragCurrentPos
+        : getNodePosition(child.row, child.col);
 
     const isCompact = displaySkin === 'simple' || displaySkin === 'pill';
     const pCenterX = pPos.x + CELL_WIDTH / 2;
@@ -1042,7 +1282,7 @@ export const GridCanvasEngine: React.FC<GridCanvasEngineProps> = ({
 
     if (connectorType === 'linear') {
       return (
-        <g key={`conn-${parent.id}-${child.id}`} className="transition-all duration-300">
+        <g key={`conn-${parent.id}-${child.id}`} className="transition-all duration-150">
           <line
             x1={pCenterX}
             y1={pBottomY}
@@ -1062,7 +1302,7 @@ export const GridCanvasEngine: React.FC<GridCanvasEngineProps> = ({
       const pathD = `M ${pCenterX} ${pBottomY} C ${pCenterX} ${midY}, ${cCenterX} ${midY}, ${cCenterX} ${cTopY}`;
 
       return (
-        <g key={`conn-${parent.id}-${child.id}`} className="transition-all duration-300">
+        <g key={`conn-${parent.id}-${child.id}`} className="transition-all duration-150">
           <path
             d={pathD}
             fill="none"
@@ -1075,12 +1315,40 @@ export const GridCanvasEngine: React.FC<GridCanvasEngineProps> = ({
       );
     }
 
-    // Default Orthogonal
-    const midY = (pBottomY + cTopY) / 2;
-    const pathD = `M ${pCenterX} ${pBottomY} L ${pCenterX} ${midY} L ${cCenterX} ${midY} L ${cCenterX} ${cTopY}`;
+    // Default Orthogonal (COLLISION-FREE CORRIDOR ROUTING)
+    let pathD = '';
+    if (child.row === parent.row + 1) {
+      // Standard consecutive generation: Corridor between rows is 100% collision-free
+      const midY = (pBottomY + cTopY) / 2;
+      pathD = `M ${pCenterX} ${pBottomY} L ${pCenterX} ${midY} L ${cCenterX} ${midY} L ${cCenterX} ${cTopY}`;
+    } else if (child.row > parent.row + 1) {
+      // Non-adjacent / skipped generation: Route along safe inter-row corridor and vertical gutters
+      const gapExitY = pPos.y + CELL_HEIGHT - 6;
+      const gapEnterY = cPos.y + 6;
+      const hasIntervening = nodes.some(
+        (n) =>
+          n.id !== parent.id &&
+          n.id !== child.id &&
+          n.col === child.col &&
+          n.row > parent.row &&
+          n.row < child.row
+      );
+
+      if (!hasIntervening) {
+        pathD = `M ${pCenterX} ${pBottomY} L ${pCenterX} ${gapExitY} L ${cCenterX} ${gapExitY} L ${cCenterX} ${cTopY}`;
+      } else {
+        const gutterCol = Math.max(parent.col, child.col) + 1;
+        const gutterX = GRID_START_X + gutterCol * CELL_WIDTH - 12;
+        pathD = `M ${pCenterX} ${pBottomY} L ${pCenterX} ${gapExitY} L ${gutterX} ${gapExitY} L ${gutterX} ${gapEnterY} L ${cCenterX} ${gapEnterY} L ${cCenterX} ${cTopY}`;
+      }
+    } else {
+      // Same row or higher row: loop around card boundary cleanly
+      const sideX = Math.max(pCenterX, cCenterX) + CELL_WIDTH / 2 + 12;
+      pathD = `M ${pCenterX} ${pBottomY} L ${pCenterX} ${pBottomY + 16} L ${sideX} ${pBottomY + 16} L ${sideX} ${cTopY - 16} L ${cCenterX} ${cTopY - 16} L ${cCenterX} ${cTopY}`;
+    }
 
     return (
-      <g key={`conn-${parent.id}-${child.id}`} className="transition-all duration-300">
+      <g key={`conn-${parent.id}-${child.id}`} className="transition-all duration-150">
         <path
           d={pathD}
           fill="none"
@@ -1931,33 +2199,131 @@ export const GridCanvasEngine: React.FC<GridCanvasEngineProps> = ({
       </header>
 
       {/* ----------------------------------------------------------------- */}
-      {/* SECONDARY TOOLBAR: BENTUK, GARIS, KANVAS, ZOOM */}
+      {/* SECONDARY TOOLBAR: COMPACT HORIZONTAL SCROLLABLE CHIPS (MOBILE FRIENDLY) */}
       {/* ----------------------------------------------------------------- */}
-      <div className="bg-slate-900/90 border-b border-slate-800 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs z-20">
-        {/* Multi-Skin Selector (Hanya Nama Saja / Kapsul / Lengkap) */}
-        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+      <div className="bg-slate-900/95 backdrop-blur border-b border-slate-800 px-2.5 py-1.5 flex items-center gap-2 text-xs z-20 overflow-x-auto no-scrollbar whitespace-nowrap">
+        {/* Tombol Rapikan Otomatis (Dynamic Tree Spacing & Auto Centering) */}
+        <button
+          onClick={handleAutoLayoutTree}
+          className="shrink-0 px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition border border-emerald-500/40"
+          title="Rapikan Otomatis: Susun ulang posisi node dengan kalkulasi lebar sub-tree & auto-centering bebas bentrok"
+        >
+          <LayoutGrid className="w-3.5 h-3.5 text-emerald-200" />
+          <span>Rapikan Otomatis</span>
+        </button>
+
+        {/* Connector Line Selector Chips */}
+        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 shrink-0">
+          <span className="text-[11px] text-slate-400 px-1 font-medium flex items-center gap-1">
+            <GitBranch className="w-3 h-3 text-indigo-400" />
+            <span>Garis:</span>
+          </span>
+          <button
+            onClick={() => {
+              setConnectorType('orthogonal');
+              showNotification('Garis Siku Paralel (Collision-Free Corridor) Aktif');
+            }}
+            className={`px-2 py-0.5 rounded text-[11px] font-medium transition flex items-center gap-1 ${
+              connectorType === 'orthogonal'
+                ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            title="Paralel Siku Bebas Nabrak (Collision-Free Corridor)"
+          >
+            <span>Siku</span>
+          </button>
+          <button
+            onClick={() => {
+              setConnectorType('bezier');
+              showNotification('Garis Lengkung Bezier Aktif');
+            }}
+            className={`px-2 py-0.5 rounded text-[11px] font-medium transition flex items-center gap-1 ${
+              connectorType === 'bezier'
+                ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            title="Lengkung Bezier"
+          >
+            <span>Bezier</span>
+          </button>
+          <button
+            onClick={() => {
+              setConnectorType('linear');
+              showNotification('Garis Seri Lurus Aktif');
+            }}
+            className={`px-2 py-0.5 rounded text-[11px] font-medium transition flex items-center gap-1 ${
+              connectorType === 'linear'
+                ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            title="Seri Lurus Langsung"
+          >
+            <Minus className="w-2.5 h-2.5" />
+            <span>Lurus</span>
+          </button>
+        </div>
+
+        {/* Node Shape Selector Chips */}
+        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 shrink-0">
+          <span className="text-[11px] text-slate-400 px-1 font-medium">Bentuk:</span>
+          <button
+            onClick={() => setNodeShape('card')}
+            className={`px-2 py-0.5 rounded text-[11px] font-medium transition flex items-center gap-1 ${
+              nodeShape === 'card'
+                ? 'bg-emerald-600 text-white font-bold'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Square className="w-3 h-3" />
+            <span>Kotak</span>
+          </button>
+          <button
+            onClick={() => setNodeShape('circle')}
+            className={`px-2 py-0.5 rounded text-[11px] font-medium transition flex items-center gap-1 ${
+              nodeShape === 'circle'
+                ? 'bg-emerald-600 text-white font-bold'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Circle className="w-3 h-3" />
+            <span>Bulat</span>
+          </button>
+          <button
+            onClick={() => setNodeShape('hexagon')}
+            className={`px-2 py-0.5 rounded text-[11px] font-medium transition flex items-center gap-1 ${
+              nodeShape === 'hexagon'
+                ? 'bg-emerald-600 text-white font-bold'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Hexagon className="w-3 h-3" />
+            <span>Hexa</span>
+          </button>
+        </div>
+
+        {/* Multi-Skin Selector Chips */}
+        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 shrink-0">
           <span className="text-[11px] text-slate-400 px-1 font-medium">Skin:</span>
           <button
             onClick={() => {
               setDisplaySkin('simple');
               showNotification('Skin Simple aktif: Hanya muncul Nama Saja');
             }}
-            className={`px-2 py-1 rounded flex items-center gap-1 transition ${
+            className={`px-2 py-0.5 rounded text-[11px] font-medium transition flex items-center gap-1 ${
               displaySkin === 'simple'
                 ? 'bg-amber-600 text-white font-bold shadow-xs'
                 : 'text-slate-400 hover:text-white'
             }`}
-            title="Skin Simple: Hanya Muncul Nama Saja Tanpa Atribut Lain"
+            title="Skin Simple: Hanya Muncul Nama Saja"
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-300"></span>
-            <span>Simple (Hanya Nama)</span>
+            <span>Simple</span>
           </button>
           <button
             onClick={() => {
               setDisplaySkin('pill');
               showNotification('Skin Kapsul aktif: Format horizontal ramping');
             }}
-            className={`px-2 py-1 rounded flex items-center gap-1 transition ${
+            className={`px-2 py-0.5 rounded text-[11px] font-medium transition flex items-center gap-1 ${
               displaySkin === 'pill'
                 ? 'bg-emerald-600 text-white font-bold shadow-xs'
                 : 'text-slate-400 hover:text-white'
@@ -1969,9 +2335,9 @@ export const GridCanvasEngine: React.FC<GridCanvasEngineProps> = ({
           <button
             onClick={() => {
               setDisplaySkin('detailed');
-              showNotification('Skin Lengkap aktif: 5 Atribut (Foto, Tahun, Domisili, Gelar)');
+              showNotification('Skin Lengkap aktif: 5 Atribut Presisi');
             }}
-            className={`px-2 py-1 rounded flex items-center gap-1 transition ${
+            className={`px-2 py-0.5 rounded text-[11px] font-medium transition flex items-center gap-1 ${
               displaySkin === 'detailed'
                 ? 'bg-emerald-600 text-white font-bold shadow-xs'
                 : 'text-slate-400 hover:text-white'
@@ -1982,111 +2348,45 @@ export const GridCanvasEngine: React.FC<GridCanvasEngineProps> = ({
           </button>
         </div>
 
-        {/* Node Shape Selector */}
-        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
-          <span className="text-[11px] text-slate-400 px-1 font-medium">Bentuk:</span>
-          <button
-            onClick={() => setNodeShape('card')}
-            className={`px-2 py-1 rounded flex items-center gap-1 transition ${
-              nodeShape === 'card'
-                ? 'bg-emerald-600 text-white font-bold'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Square className="w-3.5 h-3.5" />
-            <span>Kotak Card</span>
-          </button>
-          <button
-            onClick={() => setNodeShape('circle')}
-            className={`px-2 py-1 rounded flex items-center gap-1 transition ${
-              nodeShape === 'circle'
-                ? 'bg-emerald-600 text-white font-bold'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Circle className="w-3.5 h-3.5" />
-            <span>Lingkaran</span>
-          </button>
-          <button
-            onClick={() => setNodeShape('hexagon')}
-            className={`px-2 py-1 rounded flex items-center gap-1 transition ${
-              nodeShape === 'hexagon'
-                ? 'bg-emerald-600 text-white font-bold'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Hexagon className="w-3.5 h-3.5" />
-            <span>Hexagon</span>
-          </button>
-        </div>
-
-        {/* Connector Line Selector */}
-        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
-          <span className="text-[11px] text-slate-400 px-1 font-medium">Garis:</span>
-          <button
-            onClick={() => setConnectorType('orthogonal')}
-            className={`px-2 py-1 rounded flex items-center gap-1 transition ${
-              connectorType === 'orthogonal'
-                ? 'bg-indigo-600 text-white font-bold'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <GitBranch className="w-3.5 h-3.5" />
-            <span>Paralel Siku</span>
-          </button>
-          <button
-            onClick={() => setConnectorType('bezier')}
-            className={`px-2 py-1 rounded flex items-center gap-1 transition ${
-              connectorType === 'bezier'
-                ? 'bg-indigo-600 text-white font-bold'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Split className="w-3.5 h-3.5" />
-            <span>Bezier</span>
-          </button>
-          <button
-            onClick={() => setConnectorType('linear')}
-            className={`px-2 py-1 rounded flex items-center gap-1 transition ${
-              connectorType === 'linear'
-                ? 'bg-indigo-600 text-white font-bold'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <span className="w-3 border-t-2 border-current inline-block" />
-            <span>Seri Lurus</span>
-          </button>
-        </div>
-
         {/* Paper Size Preset Dropdown */}
-        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
-          <span className="text-[11px] text-slate-400 px-1 font-medium">Ukuran Kanvas:</span>
+        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 shrink-0">
+          <span className="text-[11px] text-slate-400 px-1 font-medium">Kertas:</span>
           <select
             value={paperSize}
             onChange={(e) => setPaperSize(e.target.value as PaperSize)}
-            className="bg-slate-900 text-slate-200 border border-slate-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-emerald-500 font-medium"
+            className="bg-slate-900 text-slate-200 border border-slate-700 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-emerald-500 font-medium"
           >
-            <option value="autofit">Auto-Fit Responsif</option>
-            <option value="A0">A0 Poster (841 x 1189 mm)</option>
-            <option value="A1">A1 (594 x 841 mm)</option>
-            <option value="A2">A2 (420 x 594 mm)</option>
-            <option value="A3">A3 (297 x 420 mm)</option>
-            <option value="A4">A4 (210 x 297 mm)</option>
+            <option value="autofit">Auto-Fit</option>
+            <option value="A0">A0</option>
+            <option value="A1">A1</option>
+            <option value="A2">A2</option>
+            <option value="A3">A3</option>
+            <option value="A4">A4</option>
           </select>
           {paperSize !== 'autofit' && (
             <button
               onClick={() =>
                 setOrientation((prev) => (prev === 'landscape' ? 'portrait' : 'landscape'))
               }
-              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] font-bold"
+              className="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] font-bold"
             >
-              {orientation === 'landscape' ? 'Landscape' : 'Portrait'}
+              {orientation === 'landscape' ? 'L' : 'P'}
             </button>
           )}
         </div>
 
+        {/* Koreksi & Urutkan Silsilah per Thn Lahir */}
+        <button
+          onClick={handleSortAllTreeByBirthYear}
+          className="shrink-0 px-2 py-1 rounded-lg bg-amber-600/90 hover:bg-amber-500 text-white text-[11px] font-bold flex items-center gap-1 shadow-xs transition active:scale-95 border border-amber-500/40"
+          title="Solusi Salah Urutan: Urutkan otomatis seluruh generasi (Kakek, Ayah, Anak) berdasarkan Tahun Lahir (Tua ke Muda)"
+        >
+          <Zap className="w-3.5 h-3.5 text-amber-200" />
+          <span>⚡ Urut Thn Lahir</span>
+        </button>
+
         {/* Canvas Zoom Controls */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0 ml-auto">
           <button
             onClick={() => setZoom((z) => Math.max(0.3, z - 0.15))}
             className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200"
@@ -2094,7 +2394,7 @@ export const GridCanvasEngine: React.FC<GridCanvasEngineProps> = ({
           >
             <ZoomOut className="w-3.5 h-3.5" />
           </button>
-          <span className="text-[11px] font-mono text-slate-300 w-11 text-center">
+          <span className="text-[11px] font-mono text-slate-300 w-10 text-center">
             {Math.round(zoom * 100)}%
           </span>
           <button
@@ -2183,10 +2483,25 @@ export const GridCanvasEngine: React.FC<GridCanvasEngineProps> = ({
             <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
               <feDropShadow dx="0" dy="4" stdDeviation="4" floodOpacity="0.35" floodColor="#000000" />
             </filter>
+            {/* Dynamic Infinite Coordinate Grid Matrix (40px cells) */}
+            <pattern id="react-matrix-subgrid" width="40" height="40" patternUnits="userSpaceOnUse">
+              <circle cx="20" cy="20" r="0.75" fill="#334155" opacity="0.4" />
+              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" strokeWidth="0.5" strokeOpacity="0.3" />
+            </pattern>
           </defs>
 
           {/* MAIN TRANSFORM GROUP (PAN & ZOOM) */}
           <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
+            {/* Infinite Coordinate Grid Matrix Background */}
+            <rect
+              x="-4000"
+              y="-4000"
+              width="16000"
+              height="16000"
+              fill="url(#react-matrix-subgrid)"
+              pointerEvents="none"
+            />
+
             {/* Paper Outline for Print Preview */}
             {paperSize !== 'autofit' && (
               <g id="paper-boundary-group">
@@ -2216,11 +2531,12 @@ export const GridCanvasEngine: React.FC<GridCanvasEngineProps> = ({
               </g>
             )}
 
-            {/* Spatial Grid Coordinates Guide */}
+            {/* Spatial Grid Coordinates Guide (Auto-Expanding Infinite Matrix) */}
             {showGridGuide && (
               <g id="spatial-grid-guides" opacity="0.85">
-                {Array.from({ length: maxRow + 3 }).map((_, r) => {
+                {Array.from({ length: Math.max(maxRow + 4, 8) }).map((_, r) => {
                   const y = GRID_START_Y + r * CELL_HEIGHT + CELL_HEIGHT / 2;
+                  const totalCols = Math.max(maxCol + 6, 12);
                   return (
                     <g key={`gen-guide-${r}`}>
                       <text
@@ -2237,7 +2553,7 @@ export const GridCanvasEngine: React.FC<GridCanvasEngineProps> = ({
                       <line
                         x1={GRID_START_X - 10}
                         y1={GRID_START_Y + r * CELL_HEIGHT}
-                        x2={GRID_START_X + (maxCol + 2) * CELL_WIDTH}
+                        x2={GRID_START_X + (totalCols + 1) * CELL_WIDTH}
                         y2={GRID_START_Y + r * CELL_HEIGHT}
                         stroke="#1e293b"
                         strokeWidth="1"
@@ -2247,7 +2563,7 @@ export const GridCanvasEngine: React.FC<GridCanvasEngineProps> = ({
                   );
                 })}
 
-                {Array.from({ length: maxCol + 3 }).map((_, c) => {
+                {Array.from({ length: Math.max(maxCol + 6, 12) }).map((_, c) => {
                   const x = GRID_START_X + c * CELL_WIDTH;
                   return (
                     <text
@@ -2634,6 +2950,55 @@ export const GridCanvasEngine: React.FC<GridCanvasEngineProps> = ({
                 🌸 Ibu Kandung: <span className="font-bold text-white">{selectedNode.motherName}</span>
               </div>
             )}
+
+            {/* Solusi Salah Urutan Anak / Saudara / Ayah / Kakek */}
+            <div className="bg-slate-950/80 p-2.5 rounded-xl border border-amber-500/30 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-amber-300 flex items-center gap-1">
+                  <ArrowLeftRight className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Koreksi Urutan Silsilah</span>
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  No: {selectedNode.dotNotation}
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400 leading-tight">
+                Tukar urutan saudara sekandung ke kiri (lebih tua) / ke kanan (lebih muda).
+              </p>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleSwapSiblingOrder(selectedNode.id, 'prev')}
+                  className="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 border border-slate-700 transition active:scale-95"
+                  title="Tukar urutan ke kiri (Lebih tua / nomor urut lebih kecil)"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5 text-amber-400" />
+                  <span>◀ Lebih Tua</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSwapSiblingOrder(selectedNode.id, 'next')}
+                  className="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 border border-slate-700 transition active:scale-95"
+                  title="Tukar urutan ke kanan (Lebih muda / nomor urut lebih besar)"
+                >
+                  <span>Lebih Muda ▶</span>
+                  <ChevronRight className="w-3.5 h-3.5 text-amber-400" />
+                </button>
+              </div>
+
+              {/* Jika node ini memiliki anak, beri tombol urutkan seluruh anak berdasarkan tahun lahir */}
+              {nodes.some((n) => n.parentId === selectedNode.id) && (
+                <button
+                  type="button"
+                  onClick={() => handleSortChildrenByBirthYear(selectedNode.id)}
+                  className="w-full py-1.5 px-2 bg-amber-950/60 hover:bg-amber-900 border border-amber-600/50 text-amber-200 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition active:scale-95"
+                  title="Urutkan seluruh anak dari anggota ini otomatis berdasarkan tahun lahir"
+                >
+                  <Zap className="w-3.5 h-3.5 text-amber-400" />
+                  <span>⚡ Urutkan Anak per Thn Lahir</span>
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Action buttons on selected node */}

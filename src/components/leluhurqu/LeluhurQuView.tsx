@@ -118,6 +118,7 @@ export interface FamilyMember {
   batchParentDotId?: string;
   batchLevel?: string | number;
   spouseRelation?: string;
+  birthOrder?: number;
 }
 
 export interface KartuKeluarga {
@@ -954,6 +955,17 @@ const EditMemberModalView: React.FC<EditMemberModalProps> = ({
   const [binBinti, setBinBinti] = useState(member.binBinti || '');
   const [kinshipTitle, setKinshipTitle] = useState(member.kinshipTitle || member.role || '');
   const [role, setRole] = useState(member.role || '');
+  const [relation, setRelation] = useState<FamilyMember['relation']>(member.relation || 'anak');
+  const [memberNo, setMemberNo] = useState(member.memberNo || '');
+  const [birthOrder, setBirthOrder] = useState<number | ''>(
+    member.birthOrder !== undefined
+      ? member.birthOrder
+      : member.role?.match(/Anak ke-(\d+)/i)
+      ? parseInt(member.role.match(/Anak ke-(\d+)/i)![1])
+      : member.kinshipTitle?.match(/Anak ke-(\d+)/i)
+      ? parseInt(member.kinshipTitle.match(/Anak ke-(\d+)/i)![1])
+      : ''
+  );
   const [trah, setTrah] = useState<FamilyMember['trah']>(member.trah);
   const [gender, setGender] = useState<'L' | 'P'>(member.gender);
   const [birthYear, setBirthYear] = useState(member.birthYear || '1990');
@@ -992,13 +1004,27 @@ const EditMemberModalView: React.FC<EditMemberModalProps> = ({
       showNotification('Nama tidak boleh kosong.');
       return;
     }
+
+    let finalKinship = kinshipTitle.trim();
+    let finalRole = role.trim() || finalKinship;
+    let finalRelation = relation;
+
+    if (birthOrder !== '' && !isNaN(Number(birthOrder))) {
+      finalKinship = `Anak ke-${birthOrder}`;
+      finalRole = `Anak ke-${birthOrder}`;
+      finalRelation = 'anak';
+    }
+
     onSave({
       ...member,
       name: name.trim(),
       nickname: nickname.trim() || undefined,
       binBinti: binBinti.trim() || undefined,
-      kinshipTitle: kinshipTitle.trim() || undefined,
-      role: role.trim() || kinshipTitle.trim(),
+      kinshipTitle: finalKinship || undefined,
+      role: finalRole,
+      relation: finalRelation,
+      memberNo: memberNo.trim() || undefined,
+      birthOrder: birthOrder !== '' ? Number(birthOrder) : undefined,
       trah,
       gender,
       birthYear: birthYear.trim() || '1990',
@@ -1096,6 +1122,109 @@ const EditMemberModalView: React.FC<EditMemberModalProps> = ({
                 onChange={e => setNickname(e.target.value)}
                 className="w-full bg-[#f0fdf4] border border-emerald-200 rounded-xl p-2 text-slate-900 focus:outline-none focus:border-emerald-600"
               />
+            </div>
+          </div>
+
+          {/* KOREKSI PERAN & NOMOR URUT SILSILAH (ANAK / AYAH / KAKEK) */}
+          <div className="bg-amber-50/80 border-2 border-amber-300 rounded-xl p-2.5 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-extrabold text-amber-950 flex items-center gap-1">
+                <ArrowUpDown className="w-3.5 h-3.5 text-amber-700" />
+                <span>Koreksi Peran &amp; Urutan Silsilah</span>
+              </span>
+              <span className="text-[9px] bg-amber-200 text-amber-900 px-1.5 py-0.2 rounded font-bold">Solusi Salah Urutan</span>
+            </div>
+
+            {/* Pilihan Peran Cepat (Kakek/Nenek/Ayah/Ibu/Anak) */}
+            <div>
+              <label className="block text-[9.5px] text-amber-900 font-bold mb-1">Peran dalam Garis Keturunan:</label>
+              <div className="grid grid-cols-3 gap-1">
+                {[
+                  { label: 'Aki (Kakek)', rel: 'kakek', title: 'Aki (Kakek)' },
+                  { label: 'Nini (Nenek)', rel: 'nenek', title: 'Nini (Nenek)' },
+                  { label: 'Ayah', rel: 'ayah', title: 'Ayah' },
+                  { label: 'Ibu', rel: 'ibu', title: 'Ibu' },
+                  { label: 'Anak', rel: 'anak', title: birthOrder ? `Anak ke-${birthOrder}` : 'Anak' },
+                  { label: 'Saudara', rel: 'saudara', title: gender === 'L' ? 'Kakak (Aa)' : 'Teteh' }
+                ].map(opt => (
+                  <button
+                    key={opt.rel}
+                    type="button"
+                    onClick={() => {
+                      setRelation(opt.rel as any);
+                      setKinshipTitle(opt.title);
+                      setRole(opt.title);
+                      if (opt.rel !== 'anak') setBirthOrder('');
+                    }}
+                    className={`py-1 px-1 rounded-lg text-[9.5px] font-bold border transition ${
+                      relation === opt.rel
+                        ? 'bg-amber-600 text-white border-amber-700 shadow-xs'
+                        : 'bg-white text-slate-700 border-amber-200 hover:bg-amber-100'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Nomor Urut Kelahiran Anak & Kode Silsilah */}
+            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-amber-200/80">
+              <div>
+                <label className="block text-[9.5px] text-amber-900 font-bold mb-1">Nomor Urut Anak:</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="30"
+                  value={birthOrder}
+                  onChange={e => {
+                    const val = e.target.value === '' ? '' : parseInt(e.target.value);
+                    setBirthOrder(val);
+                    if (val !== '') {
+                      setKinshipTitle(`Anak ke-${val}`);
+                      setRole(`Anak ke-${val}`);
+                      setRelation('anak');
+                    }
+                  }}
+                  placeholder="Contoh: 1, 2, 3..."
+                  className="w-full bg-white border border-amber-300 rounded-lg p-1.5 text-xs text-slate-900 font-bold font-mono focus:outline-none focus:border-amber-600"
+                />
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {[1, 2, 3, 4, 5, 6].map(num => (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => {
+                        setBirthOrder(num);
+                        setKinshipTitle(`Anak ke-${num}`);
+                        setRole(`Anak ke-${num}`);
+                        setRelation('anak');
+                      }}
+                      className={`px-1.5 py-0.5 rounded text-[8.5px] font-bold border ${
+                        birthOrder === num
+                          ? 'bg-amber-600 text-white border-amber-700'
+                          : 'bg-white text-amber-900 border-amber-300 hover:bg-amber-100'
+                      }`}
+                    >
+                      Ke-{num}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[9.5px] text-amber-900 font-bold mb-1">Kode Nomor Anggota:</label>
+                <input
+                  type="text"
+                  value={memberNo}
+                  onChange={e => setMemberNo(e.target.value)}
+                  placeholder="TA-01 / 1.1 / Custom"
+                  className="w-full bg-white border border-amber-300 rounded-lg p-1.5 text-xs text-slate-900 font-bold font-mono focus:outline-none focus:border-amber-600"
+                />
+                <p className="text-[8px] text-amber-800 mt-1 leading-tight">
+                  Ubah manual jika kode urutan salah.
+                </p>
+              </div>
             </div>
           </div>
 
@@ -2374,11 +2503,198 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
     }
   };
 
-  // Simpan Edit Member In-place
+  // Simpan Edit Member In-place dengan Sinkronisasi Nomor Urut
   const handleSaveEditMember = (updated: FamilyMember) => {
-    setMembers(prev => prev.map(m => (m.id === updated.id ? updated : m)));
+    setMembers(prev => {
+      let list = prev.map(m => (m.id === updated.id ? updated : m));
+
+      // Jika nomor urut anak diubah dan anggota memiliki parent, sesuaikan urutan saudara lain agar tidak bentrok
+      if (updated.parentId && updated.birthOrder) {
+        const allSiblings = list.filter(m => m.parentId === updated.parentId);
+        if (allSiblings.length > 1) {
+          const sorted = [...allSiblings].sort((a, b) => {
+            const ordA = a.id === updated.id ? updated.birthOrder! : (a.birthOrder || (parseInt(a.birthYear) || 9999));
+            const ordB = b.id === updated.id ? updated.birthOrder! : (b.birthOrder || (parseInt(b.birthYear) || 9999));
+            if (ordA !== ordB) return ordA - ordB;
+            return (a.canvasX ?? 0) - (b.canvasX ?? 0);
+          });
+          const minX = Math.min(...allSiblings.map(c => c.canvasX ?? 100));
+          sorted.forEach((s, idx) => {
+            const num = idx + 1;
+            const targetM = list.find(m => m.id === s.id);
+            if (targetM) {
+              targetM.birthOrder = num;
+              if (targetM.relation === 'anak' || targetM.role.includes('Anak')) {
+                targetM.role = `Anak ke-${num}`;
+                targetM.kinshipTitle = `Anak ke-${num}`;
+              }
+              targetM.canvasX = minX + idx * (CANVAS_CARD_WIDTH + CANVAS_GAP_X);
+            }
+          });
+        }
+      }
+      return list;
+    });
     setEditingMember(null);
-    showNotification(`Data ${updated.name} berhasil diperbarui!`);
+    showNotification(`Data & nomor urut ${updated.name} berhasil diperbarui!`);
+  };
+
+  // Koreksi Nomor Urut Anak Berdasarkan Tahun Lahir (Tertua -> Termuda)
+  const handleSortChildrenByBirthYear = (parentId: string) => {
+    const parent = members.find(m => m.id === parentId);
+    if (!parent) return;
+
+    // Kumpulkan semua anak dari parent ini (atau pasangannya)
+    const spouseId = parent.spouseId;
+    const children = members.filter(
+      m => m.parentId === parentId || (spouseId && m.parentId === spouseId) || m.motherId === parentId || (spouseId && m.motherId === spouseId)
+    );
+
+    if (children.length <= 1) {
+      showNotification(`Jumlah anak hanya ${children.length}, tidak perlu diurutkan.`);
+      return;
+    }
+
+    // Urutkan anak berdasarkan tahun lahir: tahun terkecil (lahir lebih awal) di depan
+    const sortedChildren = [...children].sort((a, b) => {
+      const yearA = parseInt(a.birthYear) || 9999;
+      const yearB = parseInt(b.birthYear) || 9999;
+      if (yearA !== yearB) return yearA - yearB;
+      return (a.canvasX ?? 0) - (b.canvasX ?? 0);
+    });
+
+    const minX = Math.min(...children.map(c => c.canvasX ?? 100));
+    const baseY = children[0].canvasY ?? ((parent.canvasY ?? 100) + CANVAS_CARD_HEIGHT + CANVAS_GAP_Y);
+
+    setMembers(prev => {
+      return prev.map(m => {
+        const sortedIndex = sortedChildren.findIndex(c => c.id === m.id);
+        if (sortedIndex !== -1) {
+          const childNumber = sortedIndex + 1;
+          const newRole = `Anak ke-${childNumber}`;
+          const newKinship = `Anak ke-${childNumber}`;
+          const newX = minX + sortedIndex * (CANVAS_CARD_WIDTH + CANVAS_GAP_X);
+          return {
+            ...m,
+            role: newRole,
+            kinshipTitle: newKinship,
+            birthOrder: childNumber,
+            canvasX: newX,
+            canvasY: baseY,
+          };
+        }
+        return m;
+      });
+    });
+
+    showNotification(`Urutan ${children.length} anak berhasil diurutkan otomatis dari tertua ke termuda!`);
+  };
+
+  // Tukar Nomor Urut Saudara (Geser Lebih Tua / Lebih Muda)
+  const handleSwapSiblingOrder = (memberId: string, direction: 'prev' | 'next') => {
+    const current = members.find(m => m.id === memberId);
+    if (!current || !current.parentId) {
+      showNotification('Hanya anggota yang memiliki orang tua / saudara yang dapat ditukar urutannya.');
+      return;
+    }
+
+    // Dapatkan semua saudara sekandung (berbagi parentId)
+    const siblings = members
+      .filter(m => m.parentId === current.parentId)
+      .sort((a, b) => (a.canvasX ?? 0) - (b.canvasX ?? 0));
+
+    const curIndex = siblings.findIndex(s => s.id === memberId);
+    if (curIndex === -1) return;
+
+    const targetIndex = direction === 'prev' ? curIndex - 1 : curIndex + 1;
+    if (targetIndex < 0 || targetIndex >= siblings.length) {
+      showNotification(direction === 'prev' ? 'Sudah berada di urutan paling pertama (tertua)!' : 'Sudah berada di urutan paling akhir (termuda)!');
+      return;
+    }
+
+    const neighbor = siblings[targetIndex];
+
+    // Tukar koordinat X dan urutan role/kinshipTitle ("Anak ke-X")
+    const tempX = current.canvasX ?? 100;
+    const neighborX = neighbor.canvasX ?? (tempX + CANVAS_CARD_WIDTH + CANVAS_GAP_X);
+
+    setMembers(prev => {
+      return prev.map(m => {
+        if (m.id === current.id) {
+          return {
+            ...m,
+            canvasX: neighborX,
+            role: neighbor.role.includes('Anak') ? neighbor.role : m.role,
+            kinshipTitle: neighbor.kinshipTitle?.includes('Anak') ? neighbor.kinshipTitle : m.kinshipTitle,
+            birthOrder: targetIndex + 1,
+          };
+        }
+        if (m.id === neighbor.id) {
+          return {
+            ...m,
+            canvasX: tempX,
+            role: current.role.includes('Anak') ? current.role : m.role,
+            kinshipTitle: current.kinshipTitle?.includes('Anak') ? current.kinshipTitle : m.kinshipTitle,
+            birthOrder: curIndex + 1,
+          };
+        }
+        return m;
+      });
+    });
+
+    showNotification(`Urutan ${current.name} berhasil ditukar dengan ${neighbor.name}!`);
+  };
+
+  // Koreksi & Urutkan Seluruh Silsilah (Kakek, Ayah/Paman, dan Anak) Sesuai Tahun Lahir
+  const handleSortAllGenerationsByBirthYear = () => {
+    if (members.length === 0) {
+      showNotification('Belum ada data silsilah.');
+      return;
+    }
+
+    const parentIds = Array.from(new Set(members.filter(m => m.parentId).map(m => m.parentId!)));
+    if (parentIds.length === 0) {
+      showNotification('Belum ada hubungan orang tua dan anak dalam silsilah.');
+      return;
+    }
+
+    setMembers(prev => {
+      let updated = [...prev];
+
+      parentIds.forEach(pId => {
+        const children = updated.filter(m => m.parentId === pId);
+        if (children.length > 1) {
+          const sorted = [...children].sort((a, b) => {
+            const yA = parseInt(a.birthYear) || 9999;
+            const yB = parseInt(b.birthYear) || 9999;
+            if (yA !== yB) return yA - yB;
+            return (a.canvasX ?? 0) - (b.canvasX ?? 0);
+          });
+
+          const minX = Math.min(...children.map(c => c.canvasX ?? 100));
+          const baseY = children[0].canvasY ?? 200;
+
+          sorted.forEach((ch, idx) => {
+            const childNum = idx + 1;
+            const matchIdx = updated.findIndex(u => u.id === ch.id);
+            if (matchIdx !== -1) {
+              updated[matchIdx] = {
+                ...updated[matchIdx],
+                role: updated[matchIdx].relation === 'anak' || updated[matchIdx].role.includes('Anak') ? `Anak ke-${childNum}` : updated[matchIdx].role,
+                kinshipTitle: updated[matchIdx].relation === 'anak' || updated[matchIdx].kinshipTitle?.includes('Anak') ? `Anak ke-${childNum}` : updated[matchIdx].kinshipTitle,
+                birthOrder: childNum,
+                canvasX: minX + idx * (CANVAS_CARD_WIDTH + CANVAS_GAP_X),
+                canvasY: baseY,
+              };
+            }
+          });
+        }
+      });
+
+      return updated;
+    });
+
+    showNotification('Seluruh urutan silsilah (Kakek, Ayah/Paman, dan Anak) berhasil dirapikan otomatis sesuai tahun lahir!');
   };
 
   // Hapus Member
@@ -4044,6 +4360,15 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-1.5 pt-0.5">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <button
+                    onClick={handleSortAllGenerationsByBirthYear}
+                    className="bg-amber-100 hover:bg-amber-200 text-amber-950 text-[11px] font-black px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 transition active:scale-95 border border-amber-300 shadow-2xs"
+                    title="Koreksi Nomor Urut: Urutkan otomatis seluruh silsilah (Kakek, Ayah/Paman, dan Anak) berdasarkan tahun lahir dari tertua ke termuda"
+                  >
+                    <ArrowUpDown className="w-3.5 h-3.5 text-amber-800" />
+                    <span>⚡ Koreksi Urutan Thn Lahir</span>
+                  </button>
+
+                  <button
                     onClick={handleApplyThreeWingsLayout}
                     className="bg-emerald-100 hover:bg-emerald-200 text-emerald-950 text-[11px] font-black px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 transition active:scale-95 border border-emerald-300 shadow-2xs"
                     title="Tata otomatis: Trah Ayah KIRI, Trah Ibu KANAN, Keluarga Inti BAWAH"
@@ -4201,6 +4526,49 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
                           <Plus className="w-3 h-3" />
                           <span>+ Adik</span>
                         </button>
+                      </div>
+                    </div>
+
+                    {/* KOREKSI URUTAN NOMOR SILSILAH (ANAK / AYAH / KAKEK) */}
+                    <div className="pt-2 border-t border-slate-700/80 flex flex-wrap items-center justify-between gap-1.5 text-[10px]">
+                      <span className="text-[10px] text-amber-300 font-bold uppercase tracking-wider flex items-center gap-1">
+                        <ArrowUpDown className="w-3 h-3 text-amber-400" />
+                        <span>Koreksi Urutan Nomor:</span>
+                      </span>
+                      <div className="flex flex-wrap items-center gap-1">
+                        {targetCard.parentId && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleSwapSiblingOrder(targetCard.id, 'prev')}
+                              className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-1 rounded-lg border border-slate-700 flex items-center gap-1 transition active:scale-95"
+                              title="Tukar posisi dengan saudara kandung sebelah kiri (lebih tua)"
+                            >
+                              <ChevronLeft className="w-3 h-3 text-amber-400" />
+                              <span>Tukar ◀ (Lebih Tua)</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSwapSiblingOrder(targetCard.id, 'next')}
+                              className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-1 rounded-lg border border-slate-700 flex items-center gap-1 transition active:scale-95"
+                              title="Tukar posisi dengan saudara kandung sebelah kanan (lebih muda)"
+                            >
+                              <span>Tukar ▶ (Lebih Muda)</span>
+                              <ChevronRight className="w-3 h-3 text-amber-400" />
+                            </button>
+                          </>
+                        )}
+                        {members.some(ch => ch.parentId === targetCard.id || (targetCard.spouseId && ch.parentId === targetCard.spouseId)) && (
+                          <button
+                            type="button"
+                            onClick={() => handleSortChildrenByBirthYear(targetCard.id)}
+                            className="bg-amber-600 hover:bg-amber-700 text-white px-2 py-1 rounded-lg font-bold flex items-center gap-1 shadow-xs transition active:scale-95"
+                            title="Urutkan semua anak-anak otomatis dari tertua ke termuda berdasarkan tahun lahir"
+                          >
+                            <ArrowUpDown className="w-3 h-3" />
+                            <span>Urutkan Anak per Thn Lahir</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -4365,21 +4733,50 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
                               </span>
                             </div>
 
-                            {/* Drag Grip Handle */}
-                            <div
-                              onMouseDown={e => {
-                                e.stopPropagation();
-                                handleDragStart(m.id, e.clientX, e.clientY);
-                              }}
-                              onTouchStart={e => {
-                                e.stopPropagation();
-                                if (e.touches[0]) handleDragStart(m.id, e.touches[0].clientX, e.touches[0].clientY);
-                              }}
-                              className="cursor-grab active:cursor-grabbing p-1 text-slate-500 hover:text-emerald-700 bg-slate-100 hover:bg-emerald-100 rounded transition flex items-center gap-0.5"
-                              title="Tarik untuk geser posisi kartu secara manual"
-                            >
-                              <GripVertical className="w-3.5 h-3.5" />
-                              <span className="text-[9px] font-bold">Geser</span>
+                            <div className="flex items-center gap-1">
+                              {/* Sibling Swap Buttons (Koreksi Urutan Saudara) */}
+                              {m.parentId && (
+                                <div className="flex items-center bg-slate-100 hover:bg-slate-200 rounded px-1 py-0.5 text-[8px] font-bold text-slate-500 gap-0.5">
+                                  <button
+                                    onClick={e => {
+                                      e.stopPropagation();
+                                      handleSwapSiblingOrder(m.id, 'prev');
+                                    }}
+                                    className="hover:text-emerald-800 hover:bg-emerald-200 p-0.5 rounded transition active:scale-90"
+                                    title="Tukar urutan dengan saudara sebelah kiri (lebih tua)"
+                                  >
+                                    <ChevronLeft className="w-2.5 h-2.5" />
+                                  </button>
+                                  <span className="text-[7.5px] uppercase font-mono">Urut</span>
+                                  <button
+                                    onClick={e => {
+                                      e.stopPropagation();
+                                      handleSwapSiblingOrder(m.id, 'next');
+                                    }}
+                                    className="hover:text-emerald-800 hover:bg-emerald-200 p-0.5 rounded transition active:scale-90"
+                                    title="Tukar urutan dengan saudara sebelah kanan (lebih muda)"
+                                  >
+                                    <ChevronRight className="w-2.5 h-2.5" />
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* Drag Grip Handle */}
+                              <div
+                                onMouseDown={e => {
+                                  e.stopPropagation();
+                                  handleDragStart(m.id, e.clientX, e.clientY);
+                                }}
+                                onTouchStart={e => {
+                                  e.stopPropagation();
+                                  if (e.touches[0]) handleDragStart(m.id, e.touches[0].clientX, e.touches[0].clientY);
+                                }}
+                                className="cursor-grab active:cursor-grabbing p-1 text-slate-500 hover:text-emerald-700 bg-slate-100 hover:bg-emerald-100 rounded transition flex items-center gap-0.5"
+                                title="Tarik untuk geser posisi kartu secara manual"
+                              >
+                                <GripVertical className="w-3.5 h-3.5" />
+                                <span className="text-[9px] font-bold">Geser</span>
+                              </div>
                             </div>
                           </div>
 
@@ -4538,6 +4935,19 @@ export const LeluhurQuView: React.FC<LeluhurQuViewProps> = ({
                               </button>
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
+                              {/* Tombol Urutkan Anak jika kartu ini adalah orang tua */}
+                              {members.some(ch => ch.parentId === m.id || (m.spouseId && ch.parentId === m.spouseId)) && (
+                                <button
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    handleSortChildrenByBirthYear(m.id);
+                                  }}
+                                  className="p-1 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded transition"
+                                  title="Urutkan semua anak otomatis dari tertua ke termuda berdasarkan tahun lahir"
+                                >
+                                  <ArrowUpDown className="w-3 h-3" />
+                                </button>
+                              )}
                               <button
                                 onClick={e => {
                                   e.stopPropagation();
